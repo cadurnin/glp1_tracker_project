@@ -1,61 +1,41 @@
-//
-//  ContentView.swift
-//  GLP1Tracker
-//
-//  Created by Ciaran Durnin on 5/26/26.
-//
-
 import SwiftUI
-import SwiftData
 
-struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+struct MainTabView: View {
+    @State private var selectedTab = 0
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView(selection: $selectedTab) {
+            CheckInWizardView()
+                .tabItem {
+                    Label("Check In", systemImage: "checkmark.circle")
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
-        }
-    }
+                .tag(0)
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
+            HistoryView()
+                .tabItem {
+                    Label("History", systemImage: "chart.xyaxis.line")
+                }
+                .tag(1)
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+            InsightsView()
+                .tabItem {
+                    Label("Insights", systemImage: "lightbulb")
+                }
+                .tag(2)
+
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .tag(3)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openDestination)) { note in
+            let destination = note.userInfo?["destination"] as? String
+            switch destination {
+            case "checkIn": selectedTab = 0
+            case "weeklyCheckIn": selectedTab = 3
+            default: selectedTab = 0
             }
         }
     }
-}
-
-#Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
 }
