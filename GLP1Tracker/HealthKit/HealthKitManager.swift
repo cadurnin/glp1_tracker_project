@@ -7,41 +7,38 @@ final class HealthKitManager {
 
     private init() {}
 
-    var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
-
     static let readTypes: Set<HKObjectType> = {
         var types: Set<HKObjectType> = []
         let quantityIds: [HKQuantityTypeIdentifier] = [
-            .restingHeartRate, .bodyMass, .dietaryWater,
-            .bloodPressureSystolic, .bloodPressureDiastolic, .bloodGlucose
+            .bodyMass, .dietaryWater, .restingHeartRate, .heartRate
         ]
-        quantityIds.forEach { types.insert(HKQuantityType($0)) }
-        let categoryIds: [HKCategoryTypeIdentifier] = [
-            .sleepAnalysis, .nausea, .appetiteChanges, .vomiting
-        ]
-        categoryIds.forEach { types.insert(HKCategoryType($0)) }
+        for id in quantityIds {
+            types.insert(HKQuantityType(id))
+        }
+        types.insert(HKCategoryType(.sleepAnalysis))
         return types
     }()
 
     static let writeTypes: Set<HKSampleType> = {
         var types: Set<HKSampleType> = []
         let quantityIds: [HKQuantityTypeIdentifier] = [.bodyMass, .dietaryWater]
-        quantityIds.forEach { types.insert(HKQuantityType($0)) }
+        for id in quantityIds {
+            types.insert(HKQuantityType(id))
+        }
         let categoryIds: [HKCategoryTypeIdentifier] = [
-            .nausea, .appetiteChanges, .vomiting, .heartburn, .diarrhea,
-            .constipation, .abdominalCramps, .bloating, .fatigue, .headache,
-            .dizziness, .shortnessOfBreath, .moodChanges, .hairLoss
+            .nausea, .vomiting, .diarrhea, .constipation, .abdominalCramps,
+            .fatigue, .appetiteChanges, .headache, .dizziness, .heartburn,
+            .bloating, .rapidPoundingOrFlutteringHeartbeat, .hotFlashes
         ]
-        categoryIds.forEach { types.insert(HKCategoryType($0)) }
+        for id in categoryIds {
+            types.insert(HKCategoryType(id))
+        }
         return types
     }()
 
     func requestAuthorization() async throws {
-        guard isAvailable else { return }
-        try await store.requestAuthorization(toShare: Self.writeTypes, read: Self.readTypes)
-    }
-
-    func authorizationStatus(for type: HKObjectType) -> HKAuthorizationStatus {
-        store.authorizationStatus(for: type)
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        try await store.requestAuthorization(toShare: HealthKitManager.writeTypes,
+                                             read: HealthKitManager.readTypes)
     }
 }

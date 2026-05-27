@@ -2,43 +2,38 @@ import HealthKit
 import Foundation
 
 struct HeartRateReader {
-    private let store: HKHealthStore
+    static func readRestingHeartRate(for date: Date) async -> Double? {
+        let store = HealthKitManager.shared.store
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+        let end = calendar.date(byAdding: .day, value: 1, to: start)!
 
-    init(store: HKHealthStore = HealthKitManager.shared.store) {
-        self.store = store
-    }
-
-    func readTodayRestingHeartRate() async -> Double? {
-        let type = HKQuantityType(.restingHeartRate)
-        let start = Calendar.current.startOfDay(for: Date())
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
-        do {
-            let descriptor = HKSampleQueryDescriptor(
-                predicates: [.quantitySample(type: type, predicate: predicate)],
-                sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)],
-                limit: 1
-            )
-            let results = try await descriptor.result(for: store)
-            if let sample = results.first {
-                return sample.quantity.doubleValue(for: HKUnit(from: "count/min"))
-            }
-        } catch {}
-        return await readAverageHeartRateToday()
-    }
-
-    private func readAverageHeartRateToday() async -> Double? {
-        let type = HKQuantityType(.heartRate)
-        let start = Calendar.current.startOfDay(for: Date())
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
-        do {
-            let descriptor = HKStatisticsQueryDescriptor(
-                predicate: .quantitySample(type: type, predicate: predicate),
-                options: .discreteAverage
-            )
-            let stats = try await descriptor.result(for: store)
-            return stats?.averageQuantity()?.doubleValue(for: HKUnit(from: "count/min"))
-        } catch {
-            return nil
+        // Try resting HR first
+        let restingType = HKQuantityType(.restingHeartRate)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: restingType, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.endDate, order: .reverse)],
+            limit: 1
+        )
+        if let results = try? await descriptor.result(for: store),
+           let sample = results.first {
+            return sample.quantity.doubleValue(for: .init(from: "count/min"))
         }
+
+        // Fallback: average of heart rate samples
+        let hrType = HKQuantityType(.heartRate)
+        let hrDescriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: hrType, predicate: predicate)],
+            sortDescriptors: [],
+            limit: HKObjectQueryNoLimit
+        )
+        if let hrResults = try? await hrDescriptor.result(for: store), !hrResults.isEmpty {
+            let unit = HKUnit(from: "count/min")
+            let total = hrResults.reduce(0.0) { $0 + $1.quantity.doubleValue(for: unit) }
+            return total / Double(hrResults.count)
+        }
+
+        return nil
     }
 }

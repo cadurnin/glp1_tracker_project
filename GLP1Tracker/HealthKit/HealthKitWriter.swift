@@ -2,69 +2,51 @@ import HealthKit
 import Foundation
 
 struct HealthKitWriter {
-    private let store: HKHealthStore
+    static func write(checkIn: DailyCheckIn) async {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        let store = HealthKitManager.shared.store
+        var samples: [HKSample] = []
+        let date = checkIn.date
 
-    init(store: HKHealthStore = HealthKitManager.shared.store) {
-        self.store = store
-    }
-
-    func writeWeight(_ kg: Double, date: Date) async throws {
-        let type = HKQuantityType(.bodyMass)
-        let quantity = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg)
-        let sample = HKQuantitySample(type: type, quantity: quantity, start: date, end: date)
-        try await store.save(sample)
-    }
-
-    func writeWater(_ litres: Double, date: Date) async throws {
-        let type = HKQuantityType(.dietaryWater)
-        let quantity = HKQuantity(unit: .liter(), doubleValue: litres)
-        let sample = HKQuantitySample(type: type, quantity: quantity, start: date, end: date)
-        try await store.save(sample)
-    }
-
-    func writeSymptoms(_ entries: [SymptomEntry], date: Date) async {
-        let presenceMap: [(String, HKCategoryTypeIdentifier)] = [
-            ("nausea", .nausea),
-            ("vomiting", .vomiting),
-            ("diarrhea", .diarrhea),
-            ("constipation", .constipation),
-            ("indigestion", .heartburn),
-            ("abdominal_pain_general", .abdominalCramps),
-            ("bloating", .bloating),
-            ("fatigue", .fatigue),
-            ("headache", .headache),
-            ("dizziness", .dizziness),
-            ("shortness_of_breath", .shortnessOfBreath),
-            ("mood_changes", .moodChanges),
-            ("hair_loss", .hairLoss),
-        ]
-
-        for (symptomId, categoryId) in presenceMap {
-            guard let entry = entries.first(where: { $0.symptomId == symptomId }) else { continue }
-            let value = entry.present
-                ? HKCategoryValuePresence.present.rawValue
-                : HKCategoryValuePresence.notPresent.rawValue
-            let sample = HKCategorySample(
-                type: HKCategoryType(categoryId),
-                value: value,
-                start: date,
-                end: date
-            )
-            try? await store.save(sample)
+        // Weight
+        if let weightKg = checkIn.weightKg {
+            let type = HKQuantityType(.bodyMass)
+            let quantity = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: weightKg)
+            samples.append(HKQuantitySample(type: type, quantity: quantity, start: date, end: date))
         }
 
-        // Appetite uses its own enum value type
-        if let entry = entries.first(where: { $0.symptomId == "appetite_loss" }) {
-            let value = entry.present
-                ? HKCategoryValueAppetiteChanges.decreased.rawValue
-                : HKCategoryValueAppetiteChanges.noChange.rawValue
-            let sample = HKCategorySample(
-                type: HKCategoryType(.appetiteChanges),
-                value: value,
-                start: date,
-                end: date
-            )
-            try? await store.save(sample)
+        // Water
+        if let water = checkIn.waterLitres {
+            let type = HKQuantityType(.dietaryWater)
+            let quantity = HKQuantity(unit: .liter(), doubleValue: water)
+            samples.append(HKQuantitySample(type: type, quantity: quantity, start: date, end: date))
         }
+
+        // Symptoms
+        for entry in checkIn.symptoms where entry.present {
+            guard let symptom = SymptomList.all.first(where: { $0.id == entry.symptomId }),
+                  let hkId = symptom.healthKitTypeId else { continue }
+
+            let categoryId = HKCategoryTypeIdentifier(rawValue: hkId)
+            let categoryType = HKCategoryType(categoryId)
+
+            if entry.symptomId == "appetite_decreased" {
+                let sample = HKCategorySample(
+                    type: categoryType,
+                    value: HKCategoryValueAppetiteChanges.decreased.rawValue,
+                    start: date, end: date
+                )
+                samples.append(sample)
+            } else {
+                let sample = HKCategorySample(
+                    type: categoryType,
+                    value: HKCategoryValuePresence.present.rawValue,
+                    start: date, end: date
+                )
+                samples.append(sample)
+            }
+        }
+
+        try? await store.save(samples)
     }
 }

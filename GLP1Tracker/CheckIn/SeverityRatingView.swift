@@ -1,65 +1,43 @@
 import SwiftUI
 
 struct SeverityRatingView: View {
-    let symptomName: String
-    @Binding var severity: Int
-    let onNext: () -> Void
-
-    private let labels = ["Mild", "Moderate", "Noticeable", "Severe", "Very Severe"]
-    private let colors: [Color] = [.green, .yellow, .orange, .orange, .red]
+    var state: CheckInState
 
     var body: some View {
-        VStack(spacing: 32) {
-            Spacer()
-
-            VStack(spacing: 8) {
-                Text("How severe was your")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Text(symptomName)
-                    .font(.title2.bold())
-                    .multilineTextAlignment(.center)
-            }
-
-            VStack(spacing: 16) {
-                Text("\(severity)")
-                    .font(.system(size: 72, weight: .light))
-                    .foregroundStyle(colors[severity - 1])
-
-                Text(labels[severity - 1])
-                    .font(.headline)
-                    .foregroundStyle(colors[severity - 1])
-
-                Slider(value: Binding(
-                    get: { Double(severity) },
-                    set: { severity = Int($0) }
-                ), in: 1...5, step: 1)
-                .tint(colors[severity - 1])
-                .padding(.horizontal)
-
-                HStack {
-                    Text("1 — Mild")
-                    Spacer()
-                    Text("5 — Very Severe")
+        VStack(spacing: 0) {
+            List {
+                Section {
+                    ForEach(state.answeredSymptoms) { symptom in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(symptom.name)
+                                .font(.subheadline.weight(.medium))
+                            HStack {
+                                Text("Severity: \(state.symptomSeverities[symptom.id] ?? 1)/5")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Slider(value: Binding(
+                                    get: { Double(state.symptomSeverities[symptom.id] ?? 1) },
+                                    set: { state.symptomSeverities[symptom.id] = Int($0) }
+                                ), in: 1...5, step: 1)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } header: {
+                    Text("Rate each symptom's severity")
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal)
             }
 
             Button {
-                onNext()
+                state.step = .overallScore
             } label: {
                 Text("Next")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .padding(.horizontal)
-
-            Spacer()
+            .padding()
         }
-        .padding()
-        .onAppear { severity = max(1, severity) }
+        .navigationTitle("Severity")
     }
 }

@@ -3,121 +3,120 @@ import Foundation
 struct PatternInsight: Identifiable {
     let id = UUID()
     let title: String
-    let detail: String
-    let isNew: Bool
+    let message: String
+    let symbolName: String
 }
 
-struct SymptomPatternAnalyzer {
-    func analyze(checkIns: [DailyCheckIn], injectionLogs: [InjectionLog]) -> [PatternInsight] {
-        guard checkIns.count >= 2 else { return [] }
-
+enum SymptomPatternAnalyzer {
+    static func analyze(checkIns: [DailyCheckIn]) -> [PatternInsight] {
+        guard checkIns.count >= 7 else { return [] }
         var insights: [PatternInsight] = []
-        let sorted = checkIns.sorted { $0.date < $1.date }
-        let last7 = Array(sorted.suffix(7))
-        let last14 = Array(sorted.suffix(14))
-        let last30 = Array(sorted.suffix(30))
 
-        // Frequency alerts: appeared 5+ out of last 7 days
-        for symptom in SymptomList.all {
-            let count = last7.filter { day in
-                day.symptoms.contains { $0.symptomId == symptom.id && $0.present }
-            }.count
-            if count >= 5 {
-                insights.append(PatternInsight(
-                    title: "Frequent \(symptom.name)",
-                    detail: "You have experienced \(symptom.name.lowercased()) \(count) out of the last 7 days.",
-                    isNew: false
-                ))
-            }
-        }
-
-        // Severity escalation: severity in last 14 days
-        for symptom in SymptomList.all where symptom.tracksSeverity {
-            let entries = last14.flatMap(\.symptoms).filter { $0.symptomId == symptom.id && $0.present && $0.severity != nil }
-            guard entries.count >= 4 else { continue }
-            let half = entries.count / 2
-            let firstHalf = Array(entries.prefix(half))
-            let secondHalf = Array(entries.suffix(half))
-            let avg1 = firstHalf.compactMap(\.severity).map(Double.init).reduce(0, +) / Double(firstHalf.count)
-            let avg2 = secondHalf.compactMap(\.severity).map(Double.init).reduce(0, +) / Double(secondHalf.count)
-            if avg2 - avg1 >= 1.0 {
-                insights.append(PatternInsight(
-                    title: "\(symptom.name) getting worse",
-                    detail: String(format: "Your \(symptom.name.lowercased()) severity has increased (avg %.1f → %.1f) over the past 2 weeks.", avg1, avg2),
-                    isNew: false
-                ))
-            }
-        }
-
-        // New symptom detection
-        for symptom in SymptomList.all {
-            let recentPresent = last7.contains { day in
-                day.symptoms.contains { $0.symptomId == symptom.id && $0.present }
-            }
-            guard recentPresent else { continue }
-            let olderDays = sorted.dropLast(7)
-            let lastSeen = olderDays.last(where: { day in
-                day.symptoms.contains { $0.symptomId == symptom.id && $0.present }
-            })?.date
-            if lastSeen == nil {
-                insights.append(PatternInsight(
-                    title: "New symptom: \(symptom.name)",
-                    detail: "You reported \(symptom.name.lowercased()) for the first time this week.",
-                    isNew: true
-                ))
-            } else if let d = lastSeen, Date().timeIntervalSince(d) > 14 * 86400 {
-                insights.append(PatternInsight(
-                    title: "\(symptom.name) returned",
-                    detail: "\(symptom.name) has returned after 14+ days of absence.",
-                    isNew: true
-                ))
-            }
-        }
-
-        // Cycle correlation: symptom peaks on specific cycle days
-        let cycleDayGroups = Dictionary(grouping: sorted) { $0.cycleDay }
-        for symptom in SymptomList.all {
-            var dayFrequency: [Int: (present: Int, total: Int)] = [:]
-            for (day, days) in cycleDayGroups {
-                let present = days.filter { d in d.symptoms.contains { $0.symptomId == symptom.id && $0.present } }.count
-                dayFrequency[day] = (present, days.count)
-            }
-            if let peak = dayFrequency.max(by: { a, b in
-                let rateA = Double(a.value.present) / Double(max(1, a.value.total))
-                let rateB = Double(b.value.present) / Double(max(1, b.value.total))
-                return rateA < rateB
-            }) {
-                let rate = Double(peak.value.present) / Double(max(1, peak.value.total))
-                if rate >= 0.7 && peak.value.total >= 3 {
-                    insights.append(PatternInsight(
-                        title: "\(symptom.name) peaks on Day \(peak.key)",
-                        detail: "Your \(symptom.name.lowercased()) is most frequent on Day \(peak.key) of your injection cycle.",
-                        isNew: false
-                    ))
-                }
-            }
-        }
-
-        // Dose increase correlation: did symptoms worsen after last dose increase?
-        if let latestLog = injectionLogs.sorted(by: { $0.date < $1.date }).last {
-            let postDose = last30.filter { $0.date > latestLog.date }
-            let preDose = last30.filter { $0.date < latestLog.date }
-            if postDose.count >= 3 && preDose.count >= 3 {
-                let countSymptoms: ([DailyCheckIn]) -> Double = { days in
-                    Double(days.flatMap(\.symptoms).filter(\.present).count) / Double(days.count)
-                }
-                let pre = countSymptoms(preDose)
-                let post = countSymptoms(postDose)
-                if post - pre >= 1.5 {
-                    insights.append(PatternInsight(
-                        title: "More symptoms after dose change",
-                        detail: "Your symptom frequency has increased since your last dose change on \(latestLog.date.formatted(.dateTime.month().day())).",
-                        isNew: false
-                    ))
-                }
-            }
-        }
+        insights += frequencyInsights(checkIns: checkIns)
+        insights += newSymptomInsights(checkIns: checkIns)
+        insights += severityTrendInsights(checkIns: checkIns)
+        insights += cycleDayInsights(checkIns: checkIns)
 
         return insights
+    }
+
+    // MARK: Frequency
+
+    private static func frequencyInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
+        let recent = Array(checkIns.sorted { $0.date > $1.date }.prefix(7))
+        let totalDays = Double(recent.count)
+
+        var insights: [PatternInsight] = []
+        for symptom in SymptomList.all {
+            let count = Double(recent.filter { c in c.symptoms.contains { $0.symptomId == symptom.id && $0.present } }.count)
+            let rate = count / totalDays
+            if rate >= 0.7 {
+                insights.append(PatternInsight(
+                    title: "Frequent: \(symptom.name)",
+                    message: "\(symptom.name) has appeared in \(Int(rate * 100))% of your recent check-ins.",
+                    symbolName: "repeat.circle.fill"
+                ))
+            }
+        }
+        return insights
+    }
+
+    // MARK: New symptom
+
+    private static func newSymptomInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
+        let sorted = checkIns.sorted { $0.date < $1.date }
+        guard sorted.count >= 8 else { return [] }
+        let recent = Array(sorted.suffix(3))
+        let previous = Array(sorted.dropLast(3))
+
+        let previousIds = Set(previous.flatMap { $0.symptoms.filter { $0.present }.map { $0.symptomId } })
+        let recentIds = Set(recent.flatMap { $0.symptoms.filter { $0.present }.map { $0.symptomId } })
+        let newIds = recentIds.subtracting(previousIds)
+
+        return newIds.compactMap { id in
+            guard let symptom = SymptomList.all.first(where: { $0.id == id }) else { return nil }
+            return PatternInsight(
+                title: "New Symptom",
+                message: "\(symptom.name) appeared recently for the first time.",
+                symbolName: "exclamationmark.circle.fill"
+            )
+        }
+    }
+
+    // MARK: Severity trend
+
+    private static func severityTrendInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
+        let sorted = checkIns.sorted { $0.date < $1.date }
+        var insights: [PatternInsight] = []
+
+        for symptom in SymptomList.all where symptom.tracksSeverity {
+            let severities = sorted.compactMap { c -> Double? in
+                guard let entry = c.symptoms.first(where: { $0.symptomId == symptom.id }),
+                      entry.present, let sev = entry.severity else { return nil }
+                return Double(sev)
+            }
+            guard severities.count >= 4 else { continue }
+
+            let recent = severities.suffix(3)
+            let old = severities.dropLast(3)
+            let recentAvg = recent.reduce(0, +) / Double(recent.count)
+            let oldAvg = old.reduce(0, +) / Double(old.count)
+
+            if recentAvg > oldAvg + 1.0 {
+                insights.append(PatternInsight(
+                    title: "\(symptom.name) Worsening",
+                    message: "The severity of \(symptom.name) has been increasing recently.",
+                    symbolName: "arrow.up.circle.fill"
+                ))
+            } else if recentAvg < oldAvg - 1.0 {
+                insights.append(PatternInsight(
+                    title: "\(symptom.name) Improving",
+                    message: "The severity of \(symptom.name) appears to be improving.",
+                    symbolName: "arrow.down.circle.fill"
+                ))
+            }
+        }
+        return insights
+    }
+
+    // MARK: Cycle day
+
+    private static func cycleDayInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
+        let injectionDayCheckIns = checkIns.filter { $0.injectionLogId != nil }
+        guard injectionDayCheckIns.count >= 3 else { return [] }
+
+        let symptomCounts = injectionDayCheckIns.map {
+            $0.symptoms.filter { $0.present }.count
+        }
+        let avg = Double(symptomCounts.reduce(0, +)) / Double(symptomCounts.count)
+
+        if avg >= 3 {
+            return [PatternInsight(
+                title: "Injection Day Pattern",
+                message: "You tend to experience more symptoms on injection days. This is common — consider timing your dose in the evening.",
+                symbolName: "syringe.fill"
+            )]
+        }
+        return []
     }
 }

@@ -1,49 +1,44 @@
 import SwiftUI
 
 struct WeeklyWeightView: View {
-    @Binding var weight: Double?
-    @AppStorage("useKg") private var useKg = true
+    @Binding var weightInput: String
     let onNext: () -> Void
-
-    @State private var rawValue: String = ""
-    @FocusState private var focused: Bool
+    @AppStorage("useKg") private var useKg = true
 
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
-            VStack(spacing: 8) {
-                Text("What is your weight this week?")
-                    .font(.title2.bold())
-                    .multilineTextAlignment(.center)
+
+            Image(systemName: "scalemass.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(Color.accentColor)
+
+            Text("Weekly weigh-in")
+                .font(.title2.bold())
+
+            HStack {
+                TextField("Optional", text: $weightInput)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 120)
+
                 Text(useKg ? "kg" : "lbs")
-                    .font(.subheadline)
+                    .font(.title3)
                     .foregroundStyle(.secondary)
             }
-            TextField("0.0", text: $rawValue)
-                .keyboardType(.decimalPad)
-                .font(.system(size: 48, weight: .light))
-                .multilineTextAlignment(.center)
-                .focused($focused)
-                .frame(maxWidth: 200)
-            VStack(spacing: 12) {
-                Button {
-                    if let val = Double(rawValue), val > 0 {
-                        weight = useKg ? val : val * 0.453592
-                    }
-                    onNext()
-                } label: {
-                    Text("Next").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(rawValue.isEmpty)
-                Button("Skip") { weight = nil; onNext() }
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
+
             Spacer()
+
+            Button {
+                onNext()
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal)
         }
         .padding()
-        .onAppear { focused = true }
     }
 }

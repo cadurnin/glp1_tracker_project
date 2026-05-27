@@ -1,70 +1,67 @@
 import SwiftUI
 
 struct WeeklyDoseReviewView: View {
-    @Binding var dose: Double
-    @AppStorage("currentDoseMg") private var storedDose: Double = 0.25
+    @Binding var doseMg: Double
     let onNext: () -> Void
 
-    @State private var doseChanged = false
-    private let doseOptions: [Double] = [0.25, 0.5, 1.0, 1.7, 2.0]
+    private let doses: [(String, Double)] = [
+        ("0.25 mg", 0.25),
+        ("0.5 mg", 0.5),
+        ("1.0 mg", 1.0),
+        ("1.7 mg", 1.7),
+        ("2.4 mg", 2.4),
+    ]
 
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
-            Text("Are you still on the same dose?")
+
+            Image(systemName: "syringe.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.green)
+
+            Text("What dose are you on this week?")
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
 
-            Text("Current dose: \(storedDose, specifier: "%.2f") mg")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 20) {
-                Button {
-                    dose = storedDose
-                    onNext()
-                } label: {
-                    Text("Yes, same dose").frame(maxWidth: .infinity)
+            VStack(spacing: 12) {
+                ForEach(doses, id: \.1) { label, mg in
+                    Button {
+                        doseMg = mg
+                    } label: {
+                        HStack {
+                            Text(label)
+                            Spacer()
+                            if doseMg == mg {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .padding()
+                        .background(
+                            doseMg == mg
+                                ? Color.accentColor.opacity(0.15)
+                                : Color(.secondarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                        .foregroundStyle(.primary)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Button {
-                    doseChanged = true
-                } label: {
-                    Text("No, changed").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
             }
             .padding(.horizontal)
 
-            if doseChanged {
-                VStack(spacing: 16) {
-                    Text("Select your new dose").font(.headline)
-                    Picker("New dose", selection: $dose) {
-                        ForEach(doseOptions, id: \.self) { d in
-                            Text("\(d, specifier: "%.2f") mg").tag(d)
-                        }
-                    }
-                    .pickerStyle(.wheel)
-
-                    Button {
-                        storedDose = dose
-                        onNext()
-                    } label: {
-                        Text("Confirm new dose").frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .padding(.horizontal)
-                }
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
             Spacer()
+
+            Button {
+                onNext()
+            } label: {
+                Text("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding(.horizontal)
         }
         .padding()
-        .animation(.easeInOut, value: doseChanged)
-        .onAppear { dose = storedDose }
     }
 }

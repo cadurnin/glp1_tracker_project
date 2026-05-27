@@ -2,19 +2,19 @@ import SwiftUI
 import SwiftData
 
 private enum WeeklyStep {
-    case weight, doseReview, rating, notes, summary
+    case weight, dose, rating, notes, summary
 }
 
 struct WeeklyCheckInView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
-    @AppStorage("currentDoseMg") private var currentDose: Double = 0.25
+
+    @AppStorage("useKg") private var useKg = true
 
     @State private var step: WeeklyStep = .weight
-    @State private var weight: Double? = nil
-    @State private var dose: Double = 0.25
-    @State private var rating: Int = 5
+    @State private var weightInput: String = ""
+    @State private var doseMg: Double = 0.5
+    @State private var rating: Int = 7
     @State private var notes: String = ""
 
     var body: some View {
@@ -22,21 +22,23 @@ struct WeeklyCheckInView: View {
             Group {
                 switch step {
                 case .weight:
-                    WeeklyWeightView(weight: $weight) { step = .doseReview }
-                case .doseReview:
-                    WeeklyDoseReviewView(dose: $dose) { step = .rating }
+                    WeeklyWeightView(weightInput: $weightInput) { step = .dose }
+                case .dose:
+                    WeeklyDoseReviewView(doseMg: $doseMg) { step = .rating }
                 case .rating:
                     WeeklyRatingView(rating: $rating) { step = .notes }
                 case .notes:
                     WeeklyNotesView(notes: $notes) { step = .summary }
                 case .summary:
                     WeeklySummaryView(
-                        weight: weight,
-                        dose: dose,
+                        weightInput: weightInput,
+                        doseMg: doseMg,
                         rating: rating,
                         notes: notes,
-                        recentCheckIns: Array(checkIns.prefix(7))
-                    ) { save() }
+                        useKg: useKg
+                    ) {
+                        save()
+                    }
                 }
             }
             .navigationTitle("Weekly Check-In")
@@ -46,134 +48,79 @@ struct WeeklyCheckInView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
-            .animation(.easeInOut(duration: 0.25), value: step)
         }
     }
 
     private func save() {
-        let recentCheckIns = Array(checkIns.prefix(7))
-        let avgSymptoms = buildSymptomSummary(from: recentCheckIns)
-        let weekStart = Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? Date()
+        let weekStart = Calendar.current.date(
+            from: Calendar.current.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        ) ?? Date()
 
-        let entry = WeeklyCheckIn(
-            weekStartDate: weekStart,
-            weightKg: weight,
-            doseAtTimeOfCheckIn: dose,
-            weekRating: rating,
-            notes: notes.isEmpty ? nil : notes,
-            symptomSummary: avgSymptoms
-        )
-        modelContext.insert(entry)
-        dismiss()
-    }
-
-    private func buildSymptomSummary(from checkIns: [DailyCheckIn]) -> String {
-        guard !checkIns.isEmpty else { return "" }
-        var counts: [String: Int] = [:]
-        for c in checkIns {
-            for s in c.symptoms where s.present {
-                counts[s.symptomId, default: 0] += 1
-            }
+        var weightKg: Double?
+        if let val = Double(weightInput), val > 0 {
+            weightKg = useKg ? val : val * 0.453592
         }
-        let top = counts.sorted { $0.value > $1.value }.prefix(3)
-        let names = top.compactMap { SymptomList.symptom(for: $0.key)?.name }
-        let avgScore = checkIns.map(\.overallScore).reduce(0, +) / checkIns.count
-        return "Avg score: \(avgScore)/10. Top symptoms: \(names.joined(separator: ", "))"
+
+        let checkIn = WeeklyCheckIn(
+            weekStartDate: weekStart,
+            weightKg: weightKg,
+            doseAtTimeOfCheckIn: doseMg,
+            weekRating: rating,
+            notes: notes.isEmpty ? nil : notes
+        )
+        modelContext.insert(checkIn)
+        dismiss()
     }
 }
 
-// MARK: Weekly summary screen
+// MARK: - Summary
 
 private struct WeeklySummaryView: View {
-    let weight: Double?
-    let dose: Double
+    let weightInput: String
+    let doseMg: Double
     let rating: Int
     let notes: String
-    let recentCheckIns: [DailyCheckIn]
+    let useKg: Bool
     let onSave: () -> Void
-
-    @AppStorage("useKg") private var useKg = true
-
-    private var avgScore: Double {
-        guard !recentCheckIns.isEmpty else { return 0 }
-        return Double(recentCheckIns.map(\.overallScore).reduce(0, +)) / Double(recentCheckIns.count)
-    }
-
-    private var bestDay: DailyCheckIn? {
-        recentCheckIns.max(by: { $0.overallScore < $1.overallScore })
-    }
-
-    private var worstDay: DailyCheckIn? {
-        recentCheckIns.min(by: { $0.overallScore < $1.overallScore })
-    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Week Summary").font(.largeTitle.bold()).padding(.top)
-
+            VStack(spacing: 20) {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    summaryCard("Week rating", "\(rating)/10", "star.fill", .yellow)
-                    summaryCard("Avg daily score", String(format: "%.1f/10", avgScore), "chart.line.uptrend.xyaxis", .green)
-                    summaryCard("Dose", String(format: "%.2f mg", dose), "syringe.fill", .purple)
-                    if let w = weight {
-                        let display = useKg ? w : w / 0.453592
-                        summaryCard("Weight", String(format: "%.1f \(useKg ? "kg" : "lbs")", display), "scalemass", .blue)
+                    StatCard(icon: "star.fill", color: .yellow, label: "Week Rating", value: "\(rating)/10")
+                    StatCard(icon: "syringe.fill", color: .green, label: "Dose", value: String(format: "%.2f mg", doseMg))
+                    if !weightInput.isEmpty, let w = Double(weightInput) {
+                        StatCard(icon: "scalemass.fill", color: .blue, label: useKg ? "kg" : "lbs", value: String(format: "%.1f", w))
                     }
                 }
-
-                if let best = bestDay {
-                    HStack {
-                        Image(systemName: "sun.max.fill").foregroundStyle(.yellow)
-                        Text("Best day: \(best.date.formatted(.dateTime.weekday(.wide)))")
-                            .font(.subheadline)
-                        Spacer()
-                        Text("\(best.overallScore)/10").font(.subheadline.bold())
-                    }
-                    .padding()
-                    .background(Color.yellow.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                }
-
-                if let worst = worstDay {
-                    HStack {
-                        Image(systemName: "cloud.fill").foregroundStyle(.gray)
-                        Text("Toughest day: \(worst.date.formatted(.dateTime.weekday(.wide)))")
-                            .font(.subheadline)
-                        Spacer()
-                        Text("\(worst.overallScore)/10").font(.subheadline.bold())
-                    }
-                    .padding()
-                    .background(Color.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                }
+                .padding(.horizontal)
 
                 if !notes.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Notes").font(.headline)
-                        Text(notes).foregroundStyle(.secondary)
+                        Text("Notes")
+                            .font(.headline)
+                        Text(notes)
+                            .foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal)
                 }
-
-                Button {
-                    onSave()
-                } label: {
-                    Text("Save Weekly Check-In").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .padding(.bottom)
             }
-            .padding(.horizontal)
+            .padding(.vertical)
         }
-    }
-
-    private func summaryCard(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon).font(.caption.bold()).foregroundStyle(color)
-            Text(value).font(.title3.bold())
+        .safeAreaInset(edge: .bottom) {
+            Button {
+                onSave()
+            } label: {
+                Text("Save")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding()
+            .background(.ultraThinMaterial)
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 }

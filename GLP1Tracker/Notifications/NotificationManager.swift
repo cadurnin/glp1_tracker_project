@@ -1,98 +1,86 @@
 import UserNotifications
 import Foundation
 
+extension Notification.Name {
+    static let openDestination = Notification.Name("openDestination")
+}
+
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
-    private let center = UNUserNotificationCenter.current()
-    private let dailyIdentifier = "daily-checkin-reminder"
-    private let weeklyIdentifier = "weekly-checkin-reminder"
-
-    override private init() {
+    private override init() {
         super.init()
-        center.delegate = self
+        UNUserNotificationCenter.current().delegate = self
     }
 
     func requestPermission() async -> Bool {
         do {
-            let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
-            return granted
+            return try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge])
         } catch {
             return false
         }
     }
 
-    // timeOfDay is seconds since midnight (e.g. 72000 = 8 PM)
-    func scheduleDailyReminder(timeOfDay: TimeInterval) {
-        center.removePendingNotificationRequests(withIdentifiers: [dailyIdentifier, weeklyIdentifier])
+    func scheduleDailyReminder(timeOfDay seconds: Double) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["dailyCheckIn"])
 
-        let components = secondsToComponents(timeOfDay)
+        let content = UNMutableNotificationContent()
+        content.title = "GLP-1 Check-In"
+        content.body = "Time for your daily symptom check-in."
+        content.sound = .default
 
-        // Daily reminder
-        let dailyContent = UNMutableNotificationContent()
-        dailyContent.title = "Time for your daily check-in"
-        dailyContent.body = "Tap to log today's symptoms and health data."
-        dailyContent.sound = .default
-        dailyContent.userInfo = ["destination": "checkIn"]
+        let totalSeconds = Int(seconds)
+        var components = DateComponents()
+        components.hour = totalSeconds / 3600
+        components.minute = (totalSeconds % 3600) / 60
 
-        var dailyTriggerComponents = components
-        dailyTriggerComponents.weekday = nil
-        let dailyTrigger = UNCalendarNotificationTrigger(dateMatching: dailyTriggerComponents, repeats: true)
-        let dailyRequest = UNNotificationRequest(identifier: dailyIdentifier, content: dailyContent, trigger: dailyTrigger)
-        center.add(dailyRequest)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        let request = UNNotificationRequest(identifier: "dailyCheckIn", content: content, trigger: trigger)
+        center.add(request)
 
-        // Weekly reminder every Sunday
-        let weeklyContent = UNMutableNotificationContent()
-        weeklyContent.title = "Weekly check-in time"
-        weeklyContent.body = "Review your week and update your dose if needed."
-        weeklyContent.sound = .default
-        weeklyContent.userInfo = ["destination": "weeklyCheckIn"]
-
-        var weeklyComponents = components
-        weeklyComponents.weekday = 1 // Sunday
-        let weeklyTrigger = UNCalendarNotificationTrigger(dateMatching: weeklyComponents, repeats: true)
-        let weeklyRequest = UNNotificationRequest(identifier: weeklyIdentifier, content: weeklyContent, trigger: weeklyTrigger)
-        center.add(weeklyRequest)
+        // Sunday weekly check-in at 18:00
+        scheduleSundayReminder()
     }
 
-    // MARK: UNUserNotificationCenterDelegate
+    private func scheduleSundayReminder() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["weeklyCheckIn"])
 
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound])
+        let content = UNMutableNotificationContent()
+        content.title = "Weekly Check-In"
+        content.body = "Time for your weekly GLP-1 progress review."
+        content.sound = .default
+        content.userInfo = ["destination": "weeklyCheckIn"]
+
+        var components = DateComponents()
+        components.weekday = 1 // Sunday
+        components.hour = 18
+        components.minute = 0
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        let request = UNNotificationRequest(identifier: "weeklyCheckIn", content: content, trigger: trigger)
+        center.add(request)
     }
 
-    func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
+    // MARK: - UNUserNotificationCenterDelegate
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 didReceive response: UNNotificationResponse,
+                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let destination = response.notification.request.content.userInfo["destination"] as? String
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .openDestination,
-                object: nil,
-                userInfo: ["destination": destination ?? "checkIn"]
-            )
-        }
+        NotificationCenter.default.post(
+            name: .openDestination,
+            object: nil,
+            userInfo: destination.map { ["destination": $0] }
+        )
         completionHandler()
     }
 
-    // MARK: Helpers
-
-    private func secondsToComponents(_ seconds: TimeInterval) -> DateComponents {
-        let totalSeconds = Int(seconds)
-        var c = DateComponents()
-        c.hour = totalSeconds / 3600
-        c.minute = (totalSeconds % 3600) / 60
-        c.second = 0
-        return c
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                 willPresent notification: UNNotification,
+                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .sound])
     }
-}
-
-extension Notification.Name {
-    static let openDestination = Notification.Name("openDestination")
 }

@@ -3,213 +3,153 @@ import Charts
 import SwiftData
 
 enum TimeRange: String, CaseIterable {
-    case week = "1W"
-    case month = "1M"
+    case week = "7D"
+    case month = "30D"
     case threeMonths = "3M"
-    case allTime = "All"
 
-    func startDate(from end: Date = Date()) -> Date {
-        let cal = Calendar.current
+    var days: Int {
         switch self {
-        case .week:        return cal.date(byAdding: .day,   value: -7,  to: end)!
-        case .month:       return cal.date(byAdding: .month, value: -1,  to: end)!
-        case .threeMonths: return cal.date(byAdding: .month, value: -3,  to: end)!
-        case .allTime:     return .distantPast
+        case .week: return 7
+        case .month: return 30
+        case .threeMonths: return 90
         }
     }
 }
 
 struct ChartDashboardView: View {
-    let checkIns: [DailyCheckIn]
-    let snapshots: [HealthSnapshot]
+    @Query(sort: \DailyCheckIn.date) private var allCheckIns: [DailyCheckIn]
+    @AppStorage("useKg") private var useKg = true
+    @AppStorage("useLitres") private var useLitres = true
 
-    @State private var range: TimeRange = .month
+    @State private var range: TimeRange = .week
 
-    private var filteredCheckIns: [DailyCheckIn] {
-        let start = range.startDate()
-        return checkIns.filter { $0.date >= start }.sorted { $0.date < $1.date }
-    }
-
-    private var filteredSnapshots: [HealthSnapshot] {
-        let start = range.startDate()
-        return snapshots.filter { $0.date >= start }.sorted { $0.date < $1.date }
+    private var checkIns: [DailyCheckIn] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -range.days, to: Date())!
+        return allCheckIns.filter { $0.date >= cutoff }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Picker("Range", selection: $range) {
-                ForEach(TimeRange.allCases, id: \.self) { r in
-                    Text(r.rawValue).tag(r)
+        ScrollView {
+            VStack(spacing: 20) {
+                Picker("Range", selection: $range) {
+                    ForEach(TimeRange.allCases, id: \.self) { r in
+                        Text(r.rawValue).tag(r)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+
+                if checkIns.isEmpty {
+                    ContentUnavailableView("No data", systemImage: "chart.xyaxis.line",
+                                          description: Text("Complete some check-ins to see charts."))
+                        .padding(.top, 60)
+                } else {
+                    weightChart
+                    scoreChart
+                    waterChart
+                    symptomBarChart
                 }
             }
-            .pickerStyle(.segmented)
-
-            if filteredCheckIns.isEmpty {
-                ContentUnavailableView("No data for this range", systemImage: "chart.xyaxis.line")
-                    .padding(.top, 40)
-            } else {
-                weightChart
-                overallScoreChart
-                waterChart
-                sleepChart
-                heartRateChart
-                symptomHeatmap
-            }
+            .padding(.vertical)
         }
     }
 
     // MARK: Weight
 
-    @ViewBuilder
     private var weightChart: some View {
-        let data = filteredCheckIns.compactMap { c -> (Date, Double)? in
+        let data = checkIns.compactMap { c -> (Date, Double)? in
             guard let w = c.weightKg else { return nil }
-            return (c.date, w)
+            return (c.date, useKg ? w : w / 0.453592)
         }
-        if !data.isEmpty {
-            chartSection("Weight (kg)", systemImage: "scalemass") {
-                Chart {
-                    ForEach(data, id: \.0) { date, weight in
-                        LineMark(x: .value("Date", date), y: .value("kg", weight))
-                            .foregroundStyle(Color.blue)
-                        AreaMark(x: .value("Date", date), y: .value("kg", weight))
-                            .foregroundStyle(Color.blue.opacity(0.08))
-                    }
-                }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+
+        return chartCard(title: "Weight", unit: useKg ? "kg" : "lbs") {
+            Chart(data, id: \.0) { item in
+                LineMark(x: .value("Date", item.0, unit: .day),
+                         y: .value("Weight", item.1))
+                .interpolationMethod(.catmullRom)
+                PointMark(x: .value("Date", item.0, unit: .day),
+                          y: .value("Weight", item.1))
             }
+            .chartXAxis { AxisMarks(values: .stride(by: .day, count: max(1, range.days / 7))) }
         }
     }
 
-    // MARK: Overall score
+    // MARK: Score
 
-    private var overallScoreChart: some View {
-        chartSection("Overall Feel Score", systemImage: "heart.fill") {
-            Chart {
-                ForEach(filteredCheckIns) { c in
-                    LineMark(x: .value("Date", c.date), y: .value("Score", c.overallScore))
-                        .foregroundStyle(Color.pink)
-                    PointMark(x: .value("Date", c.date), y: .value("Score", c.overallScore))
-                        .foregroundStyle(Color.pink)
-                }
+    private var scoreChart: some View {
+        chartCard(title: "Overall Score", unit: "/10") {
+            Chart(checkIns) { c in
+                BarMark(x: .value("Date", c.date, unit: .day),
+                        y: .value("Score", c.overallScore))
+                .foregroundStyle(scoreColor(c.overallScore))
             }
-            .chartYScale(domain: 1...10)
-            .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+            .chartYScale(domain: 0...10)
         }
     }
 
     // MARK: Water
 
-    @ViewBuilder
     private var waterChart: some View {
-        let data = filteredCheckIns.compactMap { c -> (Date, Double)? in
+        let data = checkIns.compactMap { c -> (Date, Double)? in
             guard let w = c.waterLitres else { return nil }
-            return (c.date, w)
+            return (c.date, useLitres ? w : w / 0.0295735)
         }
-        if !data.isEmpty {
-            chartSection("Water Intake (L)", systemImage: "drop.fill") {
-                Chart {
-                    ForEach(data, id: \.0) { date, litres in
-                        BarMark(x: .value("Date", date), y: .value("Litres", litres))
-                            .foregroundStyle(Color.cyan)
-                    }
-                }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+
+        return chartCard(title: "Water Intake", unit: useLitres ? "L" : "oz") {
+            Chart(data, id: \.0) { item in
+                BarMark(x: .value("Date", item.0, unit: .day),
+                        y: .value("Water", item.1))
+                .foregroundStyle(Color.cyan.gradient)
             }
         }
     }
 
-    // MARK: Sleep
+    // MARK: Symptom bar
 
-    @ViewBuilder
-    private var sleepChart: some View {
-        let data = filteredSnapshots.compactMap { s -> (Date, Double)? in
-            guard let h = s.sleepHours else { return nil }
-            return (s.date, h)
-        }
-        if !data.isEmpty {
-            chartSection("Sleep (hrs)", systemImage: "bed.double.fill") {
-                Chart {
-                    ForEach(data, id: \.0) { date, hours in
-                        BarMark(x: .value("Date", date), y: .value("Hours", hours))
-                            .foregroundStyle(Color.indigo)
-                    }
-                }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+    private var symptomBarChart: some View {
+        let counts = Dictionary(grouping: checkIns.flatMap { $0.symptoms.filter { $0.present } },
+                                by: { $0.symptomId })
+            .map { (id: $0.key, count: $0.value.count) }
+            .filter { $0.count > 0 }
+            .sorted { $0.count > $1.count }
+            .prefix(8)
+
+        return chartCard(title: "Top Symptoms", unit: "occurrences") {
+            Chart(counts, id: \.id) { item in
+                let name = SymptomList.all.first(where: { $0.id == item.id })?.name ?? item.id
+                BarMark(x: .value("Count", item.count),
+                        y: .value("Symptom", name))
+                .foregroundStyle(Color.accentColor.gradient)
             }
         }
     }
 
-    // MARK: Heart rate
+    // MARK: Helpers
 
-    @ViewBuilder
-    private var heartRateChart: some View {
-        let data = filteredSnapshots.compactMap { s -> (Date, Double)? in
-            guard let hr = s.restingHeartRate else { return nil }
-            return (s.date, hr)
+    private func scoreColor(_ score: Int) -> Color {
+        switch score {
+        case 1...3: return .red
+        case 4...6: return .orange
+        default: return .green
         }
-        if !data.isEmpty {
-            chartSection("Resting Heart Rate (bpm)", systemImage: "waveform.path.ecg") {
-                Chart {
-                    ForEach(data, id: \.0) { date, bpm in
-                        LineMark(x: .value("Date", date), y: .value("bpm", bpm))
-                            .foregroundStyle(Color.red)
-                    }
-                }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
-            }
-        }
-    }
-
-    // MARK: Symptom heatmap
-
-    private var symptomHeatmap: some View {
-        let topSymptoms = topSymptomsByFrequency(in: filteredCheckIns, limit: 8)
-        return Group {
-            if !topSymptoms.isEmpty {
-                chartSection("Symptom Frequency", systemImage: "chart.bar.fill") {
-                    Chart {
-                        ForEach(topSymptoms, id: \.id) { symptom in
-                            let count = filteredCheckIns.filter { day in
-                                day.symptoms.contains { $0.symptomId == symptom.id && $0.present }
-                            }.count
-                            BarMark(
-                                x: .value("Count", count),
-                                y: .value("Symptom", symptom.name)
-                            )
-                            .foregroundStyle(Color.accentColor)
-                        }
-                    }
-                    .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
-                    .frame(height: CGFloat(topSymptoms.count) * 36)
-                }
-            }
-        }
-    }
-
-    private func topSymptomsByFrequency(in checkIns: [DailyCheckIn], limit: Int) -> [Symptom] {
-        var counts: [String: Int] = [:]
-        for c in checkIns {
-            for s in c.symptoms where s.present {
-                counts[s.symptomId, default: 0] += 1
-            }
-        }
-        return counts
-            .sorted { $0.value > $1.value }
-            .prefix(limit)
-            .compactMap { SymptomList.symptom(for: $0.key) }
     }
 
     @ViewBuilder
-    private func chartSection<Content: View>(_ title: String, systemImage: String, @ViewBuilder content: () -> Content) -> some View {
+    private func chartCard<C: View>(title: String, unit: String, @ViewBuilder content: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.bold())
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Text(unit)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             content()
-                .frame(height: 160)
-                .padding(.vertical, 4)
+                .frame(height: 180)
         }
-        Divider()
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
     }
 }

@@ -1,164 +1,131 @@
 import SwiftUI
 import SwiftData
-import HealthKit
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
-    @Query(sort: \HealthSnapshot.date, order: .reverse) private var snapshots: [HealthSnapshot]
-    @Query(sort: \InjectionLog.date, order: .reverse) private var injectionLogs: [InjectionLog]
+    @Query private var checkIns: [DailyCheckIn]
+    @Query private var weeklyCheckIns: [WeeklyCheckIn]
+    @Query private var injectionLogs: [InjectionLog]
+    @Query private var snapshots: [HealthSnapshot]
 
-    @AppStorage("reminderTimeSeconds") private var reminderTimeSeconds: Double = 72000 // 8 PM
-    @AppStorage("useKg") private var useKg: Bool = true
-    @AppStorage("useLitres") private var useLitres: Bool = true
-    @AppStorage("medicationName") private var medicationName: String = ""
-    @AppStorage("currentDoseMg") private var currentDoseMg: Double = 0.25
-    @AppStorage("injectionDayOfWeek") private var injectionDayOfWeek: Int = 2 // Monday
+    @AppStorage("useKg") private var useKg = true
+    @AppStorage("useLitres") private var useLitres = true
+    @AppStorage("reminderTimeSeconds") private var reminderTimeSeconds = 72000.0
 
-    @State private var reminderDate: Date = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()) ?? Date()
-    @State private var showShareSheet = false
-    @State private var exportURL: URL? = nil
-    @State private var hkStatus: HKAuthorizationStatus = .notDetermined
-    @State private var requestingHK = false
+    @State private var reminderDate = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var showWeeklyCheckIn = false
-
-    private let doseOptions: [Double] = [0.25, 0.5, 1.0, 1.7, 2.0]
-    private let weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    @State private var showExportSheet = false
+    @State private var csvURL: URL?
+    @State private var showDeleteAllAlert = false
+    @State private var showDeleteAllConfirmAlert = false
 
     var body: some View {
         NavigationStack {
             Form {
-                // MARK: Reminders
-                Section("Reminders") {
-                    DatePicker("Daily reminder", selection: $reminderDate, displayedComponents: .hourAndMinute)
-                        .onChange(of: reminderDate) { _, new in
-                            let seconds = timeSeconds(from: new)
+                // MARK: Units
+                Section("Units") {
+                    Toggle("Use Kilograms (kg)", isOn: $useKg)
+                    Toggle("Use Litres (L)", isOn: $useLitres)
+                }
+
+                // MARK: Reminder
+                Section("Daily Reminder") {
+                    DatePicker("Time", selection: $reminderDate, displayedComponents: .hourAndMinute)
+                        .onChange(of: reminderDate) { _, newVal in
+                            let seconds = newVal.timeIntervalSince(Calendar.current.startOfDay(for: newVal))
                             reminderTimeSeconds = seconds
                             NotificationManager.shared.scheduleDailyReminder(timeOfDay: seconds)
                         }
-                    Picker("Injection day", selection: $injectionDayOfWeek) {
-                        ForEach(0..<weekdays.count, id: \.self) { i in
-                            Text(weekdays[i]).tag(i)
-                        }
-                    }
-                }
-
-                // MARK: Units
-                Section("Units") {
-                    Toggle("Use kilograms (kg)", isOn: $useKg)
-                    Toggle("Use litres (L)", isOn: $useLitres)
-                }
-
-                // MARK: Medication
-                Section("Medication") {
-                    TextField("Medication name (e.g. Ozempic)", text: $medicationName)
-                    Picker("Current dose", selection: $currentDoseMg) {
-                        ForEach(doseOptions, id: \.self) { d in
-                            Text("\(d, specifier: "%.2f") mg").tag(d)
-                        }
-                    }
                 }
 
                 // MARK: Weekly check-in
-                Section("Weekly Review") {
-                    Button("Start weekly check-in") {
+                Section("Weekly") {
+                    Button("Start Weekly Check-In") {
                         showWeeklyCheckIn = true
                     }
                 }
 
                 // MARK: HealthKit
-                Section("HealthKit") {
-                    HStack {
-                        Text("Status")
-                        Spacer()
-                        Text(hkStatusText).foregroundStyle(.secondary)
-                    }
-                    Button(requestingHK ? "Requesting…" : "Re-request HealthKit permissions") {
+                Section("Apple Health") {
+                    Button("Re-request HealthKit Access") {
                         Task {
-                            requestingHK = true
                             try? await HealthKitManager.shared.requestAuthorization()
-                            updateHKStatus()
-                            requestingHK = false
                         }
                     }
-                    .disabled(requestingHK)
                 }
 
                 // MARK: Export
                 Section("Data") {
-                    Button("Export to CSV") {
+                    Button("Export as CSV") {
                         exportCSV()
                     }
-                    Text("\(checkIns.count) check-ins · \(injectionLogs.count) injections")
-                        .font(.caption)
+                }
+
+                // MARK: Delete All
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteAllAlert = true
+                    } label: {
+                        Label("Delete All Data", systemImage: "trash.fill")
+                    }
+                } footer: {
+                    Text("This permanently deletes all check-ins, injection logs, and health snapshots. This cannot be undone.")
                         .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
-            .onAppear {
-                reminderDate = Self.reminderTime(from: reminderTimeSeconds)
-                updateHKStatus()
-            }
+            .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $showWeeklyCheckIn) {
                 WeeklyCheckInView()
             }
-            .sheet(isPresented: $showShareSheet) {
-                if let url = exportURL {
-                    ShareSheet(url: url)
+            .sheet(isPresented: $showExportSheet) {
+                if let url = csvURL {
+                    ShareSheet(items: [url])
                 }
+            }
+            // First alert — confirm intent
+            .alert("Delete All Data?", isPresented: $showDeleteAllAlert) {
+                Button("Delete Everything", role: .destructive) {
+                    showDeleteAllConfirmAlert = true
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently delete all \(checkIns.count) daily check-in(s), \(weeklyCheckIns.count) weekly check-in(s), \(injectionLogs.count) injection log(s), and \(snapshots.count) health snapshot(s).\n\nThis action cannot be undone.")
+            }
+            // Second alert — double-confirm
+            .alert("Are you absolutely sure?", isPresented: $showDeleteAllConfirmAlert) {
+                Button("Yes, Delete Everything", role: .destructive) {
+                    deleteAllData()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("All your data will be permanently removed from this device.")
+            }
+        }
+        .onAppear {
+            let seconds = reminderTimeSeconds
+            if seconds > 0 {
+                let today = Calendar.current.startOfDay(for: Date())
+                reminderDate = Date(timeInterval: seconds, since: today)
             }
         }
     }
 
-    // MARK: Helpers
+    // MARK: - Actions
 
     private func exportCSV() {
-        let exporter = CSVExporter()
-        if let url = exporter.export(checkIns: checkIns, snapshots: snapshots, injectionLogs: injectionLogs) {
-            exportURL = url
-            showShareSheet = true
-        }
+        let csv = CSVExporter.export(checkIns: checkIns)
+        let fileName = "GLP1Tracker_\(Date().formatted(.iso8601.year().month().day())).csv"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        try? csv.write(to: url, atomically: true, encoding: .utf8)
+        csvURL = url
+        showExportSheet = true
     }
 
-    private func updateHKStatus() {
-        let type = HKQuantityType(.bodyMass)
-        hkStatus = HealthKitManager.shared.authorizationStatus(for: type)
+    private func deleteAllData() {
+        for item in checkIns { modelContext.delete(item) }
+        for item in weeklyCheckIns { modelContext.delete(item) }
+        for item in injectionLogs { modelContext.delete(item) }
+        for item in snapshots { modelContext.delete(item) }
     }
-
-    private var hkStatusText: String {
-        switch hkStatus {
-        case .notDetermined: return "Not requested"
-        case .sharingDenied: return "Denied"
-        case .sharingAuthorized: return "Authorized"
-        @unknown default: return "Unknown"
-        }
-    }
-
-    private static func reminderTime(from seconds: Double) -> Date {
-        let comps = secondsToComponents(seconds)
-        return Calendar.current.date(from: comps) ?? Date()
-    }
-
-    private func timeSeconds(from date: Date) -> Double {
-        let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
-        return Double((comps.hour ?? 20) * 3600 + (comps.minute ?? 0) * 60)
-    }
-
-    private static func secondsToComponents(_ seconds: Double) -> DateComponents {
-        let total = Int(seconds)
-        var c = DateComponents()
-        c.hour = total / 3600
-        c.minute = (total % 3600) / 60
-        return c
-    }
-}
-
-// MARK: Share sheet wrapper
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let url: URL
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    }
-    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

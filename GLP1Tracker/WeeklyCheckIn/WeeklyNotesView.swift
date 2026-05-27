@@ -6,37 +6,28 @@ struct WeeklyNotesView: View {
 
     var body: some View {
         VStack(spacing: 24) {
-            Spacer()
+            Image(systemName: "note.text")
+                .font(.system(size: 64))
+                .foregroundStyle(Color.accentColor)
+
             Text("Any notes for the week?")
                 .font(.title2.bold())
-                .multilineTextAlignment(.center)
 
             TextEditor(text: $notes)
-                .frame(height: 180)
+                .frame(height: 160)
                 .padding(8)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.secondary.opacity(0.3)))
-                .overlay(alignment: .topLeading) {
-                    if notes.isEmpty {
-                        Text("How did the week go? Any observations…")
-                            .foregroundStyle(.secondary)
-                            .padding(16)
-                            .allowsHitTesting(false)
-                    }
-                }
+                .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
 
-            VStack(spacing: 12) {
-                Button {
-                    onNext()
-                } label: {
-                    Text("Done").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Button("Skip") { notes = ""; onNext() }
-                    .foregroundStyle(.secondary)
-            }
             Spacer()
+
+            Button {
+                onNext()
+            } label: {
+                Text("Save Weekly Check-In")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
         }
         .padding()
     }

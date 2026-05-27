@@ -1,63 +1,63 @@
 import SwiftUI
 
 struct OverallScoreView: View {
-    @Binding var score: Int
-    let onNext: () -> Void
-
-    private let emojis = ["😫", "😩", "😟", "😕", "😐", "🙂", "😊", "😄", "😁", "🤩"]
-    private func color(for score: Int) -> Color {
-        switch score {
-        case 1...3: return .red
-        case 4...6: return .orange
-        case 7...8: return .yellow
-        default: return .green
-        }
-    }
+    var state: CheckInState
 
     var body: some View {
         VStack(spacing: 32) {
             Spacer()
 
+            Image(systemName: "face.smiling.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.yellow)
+
             Text("How do you feel overall today?")
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
 
-            VStack(spacing: 8) {
-                Text(emojis[score - 1])
-                    .font(.system(size: 72))
-                Text("\(score) / 10")
-                    .font(.title.bold())
-                    .foregroundStyle(color(for: score))
-            }
+            VStack(spacing: 12) {
+                Text("\(state.overallScore) / 10")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundStyle(scoreColor)
 
-            Slider(value: Binding(
-                get: { Double(score) },
-                set: { score = Int($0) }
-            ), in: 1...10, step: 1)
-            .tint(color(for: score))
-            .padding(.horizontal)
+                Slider(value: Binding(
+                    get: { Double(state.overallScore) },
+                    set: { state.overallScore = Int($0) }
+                ), in: 1...10, step: 1)
+                .tint(scoreColor)
 
-            HStack {
-                Text("1 — Terrible")
-                Spacer()
-                Text("10 — Great")
+                HStack {
+                    Text("Poor")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("Great")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
+            .padding(.horizontal, 32)
+
+            Spacer()
 
             Button {
-                onNext()
+                state.step = .summary
             } label: {
-                Text("Next")
+                Text("Review Summary")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .padding(.horizontal)
-
-            Spacer()
         }
         .padding()
+    }
+
+    private var scoreColor: Color {
+        switch state.overallScore {
+        case 1...3: return .red
+        case 4...6: return .orange
+        default: return .green
+        }
     }
 }

@@ -6,36 +6,24 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             CheckInWizardView()
-                .tabItem {
-                    Label("Check In", systemImage: "checkmark.circle")
-                }
+                .tabItem { Label("Check In", systemImage: "checkmark.circle") }
                 .tag(0)
 
             HistoryView()
-                .tabItem {
-                    Label("History", systemImage: "chart.xyaxis.line")
-                }
+                .tabItem { Label("History", systemImage: "chart.xyaxis.line") }
                 .tag(1)
 
             InsightsView()
-                .tabItem {
-                    Label("Insights", systemImage: "lightbulb")
-                }
+                .tabItem { Label("Insights", systemImage: "lightbulb") }
                 .tag(2)
 
             SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
+                .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(3)
         }
         .onReceive(NotificationCenter.default.publisher(for: .openDestination)) { note in
             let destination = note.userInfo?["destination"] as? String
-            switch destination {
-            case "checkIn": selectedTab = 0
-            case "weeklyCheckIn": selectedTab = 3
-            default: selectedTab = 0
-            }
+            selectedTab = destination == "weeklyCheckIn" ? 3 : 0
         }
     }
 }

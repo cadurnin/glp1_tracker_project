@@ -1,35 +1,26 @@
 import SwiftUI
-import SwiftData
 
 struct HistoryView: View {
-    @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
-    @Query(sort: \HealthSnapshot.date, order: .reverse) private var snapshots: [HealthSnapshot]
-
-    @State private var showCharts = true
+    @State private var showCharts = false
 
     var body: some View {
         NavigationStack {
             Group {
                 if showCharts {
-                    ScrollView {
-                        ChartDashboardView(checkIns: checkIns, snapshots: snapshots)
-                            .padding()
-                    }
+                    ChartDashboardView()
                 } else {
-                    ScrollView {
-                        CheckInListView(checkIns: checkIns)
-                    }
+                    CheckInListView()
                 }
             }
             .navigationTitle("History")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Picker("View", selection: $showCharts) {
-                        Label("Charts", systemImage: "chart.xyaxis.line").tag(true)
-                        Label("List", systemImage: "list.bullet").tag(false)
+                        Image(systemName: "list.bullet").tag(false)
+                        Image(systemName: "chart.xyaxis.line").tag(true)
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 120)
                 }
             }
         }

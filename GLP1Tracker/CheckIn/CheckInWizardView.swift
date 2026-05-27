@@ -1,244 +1,181 @@
 import SwiftUI
 import SwiftData
-import Observation
 
-// MARK: Wizard step enum
+// MARK: - Wizard Step
 
 enum WizardStep: Equatable, Hashable {
+    case injection
     case weight
     case water
-    case symptomQuestion(Int)
-    case symptomSeverity(Int)
+    case symptoms
+    case severity
     case overallScore
-    case injection
     case summary
 }
 
-// MARK: Shared check-in state
+// MARK: - Check-In State
 
 @Observable
 final class CheckInState {
-    var weight: Double? = nil
-    var water: Double? = nil
-    var symptomAnswers: [String: Bool] = [:]
-    var symptomSeverities: [String: Int] = [:]
-    var overallScore: Int = 5
+    var step: WizardStep = .injection
+    var date: Date = Date()
+
+    // Injection
     var isInjectionDay: Bool = false
-    var injectionDose: Double = 0.25
-    var injectionTime: Date = Date()
+    var doseMg: Double = 0.5
+    var doseLabel: String = "0.5 mg"
     var injectionSiteNote: String = ""
 
-    func symptomEntries(checkInId: UUID, date: Date) -> [SymptomEntry] {
-        SymptomList.all.compactMap { symptom in
-            guard let present = symptomAnswers[symptom.id] else { return nil }
-            return SymptomEntry(
-                symptomId: symptom.id,
-                present: present,
-                severity: present ? symptomSeverities[symptom.id] : nil,
-                date: date,
-                checkInId: checkInId
-            )
-        }
+    // Stats
+    var weightInput: String = ""
+    var waterInput: String = ""
+
+    // Symptoms
+    var symptomAnswers: [String: Bool] = [:]
+    var symptomSeverities: [String: Int] = [:]
+
+    // Overall
+    var overallScore: Int = 5
+
+    var answeredSymptoms: [Symptom] {
+        SymptomList.all.filter { symptomAnswers[$0.id] == true && $0.tracksSeverity }
     }
 }
 
-// MARK: Wizard container
+// MARK: - Wizard View
 
 struct CheckInWizardView: View {
-    @Query(sort: \InjectionLog.date, order: .reverse) private var injectionLogs: [InjectionLog]
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
+    @Query(sort: \InjectionLog.date, order: .reverse) private var injections: [InjectionLog]
 
     @State private var state = CheckInState()
-    @State private var step: WizardStep = .weight
-    @State private var completed = false
+    @AppStorage("useKg") private var useKg = true
+    @AppStorage("useLitres") private var useLitres = true
 
-    private var alreadyCheckedInToday: Bool {
-        guard let last = checkIns.first else { return false }
-        return Calendar.current.isDateInToday(last.date)
-    }
-
-    private var cycleDay: Int {
-        InjectionLog.cycleDay(from: injectionLogs.first?.date)
+    private var hasCheckedInToday: Bool {
+        guard let recent = checkIns.first else { return false }
+        return Calendar.current.isDateInToday(recent.date)
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if (completed || alreadyCheckedInToday), let recent = checkIns.first {
-                    TodaySummaryView(checkIn: recent)
+                if hasCheckedInToday {
+                    if let recent = checkIns.first {
+                        TodaySummaryView(checkIn: recent)
+                    }
                 } else {
-                    wizardPage
-                        .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
-                        .id(step)
-                        .animation(.easeInOut(duration: 0.25), value: step)
+                    wizardContent
                 }
             }
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Check In")
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 
     @ViewBuilder
-    private var wizardPage: some View {
-        switch step {
-        case .weight:
-            WeightEntryView(weight: $state.weight) { advance() }
-
-        case .water:
-            WaterEntryView(water: $state.water) { advance() }
-
-        case .symptomQuestion(let idx):
-            SymptomQuestionView(
-                symptom: SymptomList.all[idx],
-                answer: Binding(
-                    get: { state.symptomAnswers[SymptomList.all[idx].id] ?? false },
-                    set: { state.symptomAnswers[SymptomList.all[idx].id] = $0 }
-                )
-            ) { advance() }
-
-        case .symptomSeverity(let idx):
-            let id = SymptomList.all[idx].id
-            SeverityRatingView(
-                symptomName: SymptomList.all[idx].name,
-                severity: Binding(
-                    get: { state.symptomSeverities[id] ?? 1 },
-                    set: { state.symptomSeverities[id] = $0 }
-                )
-            ) { advance() }
-
-        case .overallScore:
-            OverallScoreView(score: $state.overallScore) { advance() }
-
+    private var wizardContent: some View {
+        switch state.step {
         case .injection:
-            InjectionEntryView(
-                isInjectionDay: $state.isInjectionDay,
-                dose: $state.injectionDose,
-                time: $state.injectionTime,
-                siteNote: $state.injectionSiteNote
-            ) { advance() }
-
+            InjectionEntryView(state: state, lastInjection: injections.first)
+        case .weight:
+            WeightEntryView(state: state)
+        case .water:
+            WaterEntryView(state: state)
+        case .symptoms:
+            SymptomQuestionView(state: state)
+        case .severity, .overallScore:
+            OverallScoreView(state: state)
         case .summary:
-            CheckInSummaryView(state: state, cycleDay: cycleDay) {
-                completed = true
+            CheckInSummaryView(state: state) {
+                save()
             }
         }
     }
 
-    private var navigationTitle: String {
-        switch step {
-        case .weight: return "Weight"
-        case .water: return "Water Intake"
-        case .symptomQuestion(let i): return "Symptom \(i + 1) of \(SymptomList.all.count)"
-        case .symptomSeverity: return "Severity"
-        case .overallScore: return "Overall Feeling"
-        case .injection: return "Injection"
-        case .summary: return "Summary"
-        }
-    }
+    private func save() {
+        let checkIn = DailyCheckIn(
+            date: state.date,
+            overallScore: state.overallScore
+        )
 
-    private func advance() {
-        withAnimation(.easeInOut(duration: 0.25)) {
-            step = nextStep(after: step)
+        // Weight
+        if let val = Double(state.weightInput), val > 0 {
+            checkIn.weightKg = useKg ? val : val * 0.453592
         }
-    }
 
-    private func nextStep(after current: WizardStep) -> WizardStep {
-        switch current {
-        case .weight:
-            return .water
-        case .water:
-            return .symptomQuestion(0)
-        case .symptomQuestion(let idx):
-            let symptom = SymptomList.all[idx]
-            if state.symptomAnswers[symptom.id] == true && symptom.tracksSeverity {
-                return .symptomSeverity(idx)
-            }
-            return nextSymptomOrScore(after: idx)
-        case .symptomSeverity(let idx):
-            return nextSymptomOrScore(after: idx)
-        case .overallScore:
-            return .injection
-        case .injection:
-            return .summary
-        case .summary:
-            return .summary
+        // Water
+        if let val = Double(state.waterInput), val > 0 {
+            checkIn.waterLitres = useLitres ? val : val * 0.0295735
         }
-    }
 
-    private func nextSymptomOrScore(after idx: Int) -> WizardStep {
-        let next = idx + 1
-        return next < SymptomList.all.count ? .symptomQuestion(next) : .overallScore
+        // Cycle day
+        checkIn.cycleDay = InjectionLog.cycleDay(from: injections.first?.date)
+
+        // Injection log
+        if state.isInjectionDay {
+            let log = InjectionLog(
+                date: state.date,
+                time: state.date,
+                doseMg: state.doseMg,
+                doseLabel: state.doseLabel,
+                injectionSiteNote: state.injectionSiteNote.isEmpty ? nil : state.injectionSiteNote
+            )
+            modelContext.insert(log)
+            checkIn.injectionLogId = log.id
+        }
+
+        // Symptoms
+        for symptom in SymptomList.all {
+            let present = state.symptomAnswers[symptom.id] ?? false
+            let entry = SymptomEntry(
+                symptomId: symptom.id,
+                present: present,
+                severity: present && symptom.tracksSeverity ? (state.symptomSeverities[symptom.id] ?? 1) : nil,
+                date: state.date,
+                checkInId: checkIn.id
+            )
+            checkIn.symptoms.append(entry)
+        }
+
+        modelContext.insert(checkIn)
+
+        // HealthKit write
+        Task {
+            await HealthKitWriter.write(checkIn: checkIn)
+            let snapshot = await HealthKitMirror.buildSnapshot(for: state.date, checkIn: checkIn)
+            await MainActor.run { modelContext.insert(snapshot) }
+        }
+
+        // Reset wizard
+        state = CheckInState()
     }
 }
 
-// MARK: Today's completed check-in view
+// MARK: - Today Summary View
 
 struct TodaySummaryView: View {
     let checkIn: DailyCheckIn
-    @AppStorage("useKg") private var useKg = true
-    @AppStorage("useLitres") private var useLitres = true
-
-    private var presentSymptoms: [SymptomEntry] {
-        checkIn.symptoms.filter { $0.present }
-    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .font(.title)
-                    Text("Check-in complete!")
-                        .font(.title2.bold())
-                }
-                .padding(.top)
-
-                Text("Day \(checkIn.cycleDay) of your injection cycle")
+        VStack(spacing: 24) {
+            Spacer()
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 72))
+                .foregroundStyle(.green)
+            Text("You've already checked in today!")
+                .font(.title2.bold())
+                .multilineTextAlignment(.center)
+            Text("Overall score: \(checkIn.overallScore)/10")
+                .foregroundStyle(.secondary)
+            let present = checkIn.symptoms.filter { $0.present }
+            if !present.isEmpty {
+                Text("\(present.count) symptom(s) logged")
                     .foregroundStyle(.secondary)
-
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    infoCard("Overall", "\(checkIn.overallScore)/10", "heart.fill", .pink)
-                    if let w = checkIn.weightKg {
-                        let display = useKg ? w : w / 0.453592
-                        infoCard("Weight", String(format: "%.1f \(useKg ? "kg" : "lbs")", display), "scalemass", .blue)
-                    }
-                    if let w = checkIn.waterLitres {
-                        let display = useLitres ? w : w / 0.0295735
-                        infoCard("Water", String(format: "%.1f \(useLitres ? "L" : "oz")", display), "drop.fill", .cyan)
-                    }
-                }
-
-                if !presentSymptoms.isEmpty {
-                    Text("Symptoms logged")
-                        .font(.headline)
-                    ForEach(presentSymptoms) { entry in
-                        if let symptom = SymptomList.symptom(for: entry.symptomId) {
-                            HStack {
-                                Circle().fill(Color.accentColor).frame(width: 6, height: 6)
-                                Text(symptom.name)
-                                Spacer()
-                                if let s = entry.severity { Text("Severity \(s)/5").foregroundStyle(.secondary).font(.caption) }
-                            }
-                        }
-                    }
-                } else {
-                    Text("No symptoms reported")
-                        .foregroundStyle(.secondary)
-                        .italic()
-                }
             }
-            .padding(.horizontal)
-        }
-    }
-
-    private func infoCard(_ title: String, _ value: String, _ icon: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon).font(.caption.bold()).foregroundStyle(color)
-            Text(value).font(.title3.bold())
+            Spacer()
         }
         .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 }

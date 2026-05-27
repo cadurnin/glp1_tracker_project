@@ -43,7 +43,7 @@ struct GLP1TrackerApp: App {
     }
 }
 
-// MARK: Disclaimer
+// MARK: - Disclaimer
 
 struct DisclaimerView: View {
     let onAccept: () -> Void

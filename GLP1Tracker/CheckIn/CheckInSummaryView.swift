@@ -1,68 +1,133 @@
 import SwiftUI
-import SwiftData
 
 struct CheckInSummaryView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \InjectionLog.date, order: .reverse) private var injectionLogs: [InjectionLog]
+    var state: CheckInState
+    let onSave: () -> Void
 
-    let state: CheckInState
-    let cycleDay: Int
-    let onDone: () -> Void
-
-    @State private var heartRate: Double? = nil
-    @State private var sleepData: SleepData? = nil
-    @State private var isLoadingHK = true
-    @State private var pendingStopWarnings: [WarningResult] = []
-    @State private var cautionWarnings: [WarningResult] = []
-    @State private var currentStopWarning: WarningResult? = nil
-    @State private var acknowledgedAllStopWarnings = false
-    @State private var isSaving = false
     @AppStorage("useKg") private var useKg = true
     @AppStorage("useLitres") private var useLitres = true
 
-    private var presentSymptoms: [Symptom] {
-        SymptomList.all.filter { state.symptomAnswers[$0.id] == true }
+    @State private var pendingStopWarnings: [WarningResult] = []
+    @State private var currentStopWarning: WarningResult?
+
+    private var warnings: [WarningResult] {
+        let entries = SymptomList.all.map { symptom in
+            SymptomEntry(
+                symptomId: symptom.id,
+                present: state.symptomAnswers[symptom.id] ?? false,
+                severity: state.symptomSeverities[symptom.id],
+                date: state.date,
+                checkInId: UUID()
+            )
+        }
+        return SymptomWarningEvaluator.evaluate(entries: entries)
+    }
+
+    private var stopWarnings: [WarningResult] {
+        warnings.filter { $0.level == .stopDrug }
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                Text("Today's Summary")
-                    .font(.largeTitle.bold())
-                    .padding(.top)
-
-                cycleDaySection
-                statsSection
-                healthKitSection
-                symptomsSection
-
-                if !cautionWarnings.isEmpty {
-                    cautionBannersSection
-                }
-
-                Spacer(minLength: 20)
-
-                Button {
-                    save()
-                } label: {
-                    if isSaving {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        Text("Done")
-                            .frame(maxWidth: .infinity)
+            VStack(spacing: 20) {
+                // Stats cards
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    if !state.weightInput.isEmpty, let w = Double(state.weightInput) {
+                        StatCard(
+                            icon: "scalemass.fill",
+                            color: .blue,
+                            label: useKg ? "Weight (kg)" : "Weight (lbs)",
+                            value: String(format: "%.1f", w)
+                        )
+                    }
+                    if !state.waterInput.isEmpty, let w = Double(state.waterInput) {
+                        StatCard(
+                            icon: "drop.fill",
+                            color: .cyan,
+                            label: useLitres ? "Water (L)" : "Water (oz)",
+                            value: String(format: "%.1f", w)
+                        )
+                    }
+                    StatCard(
+                        icon: "face.smiling.fill",
+                        color: .yellow,
+                        label: "Overall",
+                        value: "\(state.overallScore)/10"
+                    )
+                    if state.isInjectionDay {
+                        StatCard(
+                            icon: "syringe.fill",
+                            color: .green,
+                            label: "Dose",
+                            value: state.doseLabel
+                        )
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!acknowledgedAllStopWarnings || isSaving)
-                .padding(.bottom)
+                .padding(.horizontal)
+
+                // Warnings
+                if !warnings.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Warnings")
+                            .font(.headline)
+                            .padding(.horizontal)
+
+                        ForEach(warnings) { warning in
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: warning.level == .stopDrug ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                                    .foregroundStyle(warning.level == .stopDrug ? Color.red : Color.orange)
+                                Text(warning.message)
+                                    .font(.subheadline)
+                            }
+                            .padding()
+                            .background(
+                                (warning.level == .stopDrug ? Color.red : Color.orange).opacity(0.1),
+                                in: RoundedRectangle(cornerRadius: 12)
+                            )
+                            .padding(.horizontal)
+                        }
+                    }
+                }
+
+                // Symptoms
+                let presentSymptoms = SymptomList.all.filter { state.symptomAnswers[$0.id] == true }
+                if !presentSymptoms.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Symptoms Today")
+                            .font(.headline)
+                            .padding(.horizontal)
+
+                        FlowLayout(spacing: 8) {
+                            ForEach(presentSymptoms) { symptom in
+                                SymptomChip(symptom: symptom,
+                                            severity: state.symptomSeverities[symptom.id])
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
             }
-            .padding(.horizontal)
+            .padding(.vertical)
         }
-        .task {
-            await loadHealthKitData()
-            evaluateWarnings()
+        .navigationTitle("Summary")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom) {
+            Button {
+                let stops = stopWarnings
+                if stops.isEmpty {
+                    onSave()
+                } else {
+                    pendingStopWarnings = stops
+                    currentStopWarning = stops.first
+                }
+            } label: {
+                Text("Save Check-In")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .padding()
+            .background(.ultraThinMaterial)
         }
         .fullScreenCover(item: $currentStopWarning) { warning in
             StopDrugWarningModal(warning: warning) {
@@ -71,280 +136,117 @@ struct CheckInSummaryView: View {
         }
     }
 
-    // MARK: Sections
-
-    private var cycleDaySection: some View {
-        HStack {
-            Image(systemName: "syringe")
-                .foregroundStyle(Color.accentColor)
-            Text("Day \(cycleDay) of your injection cycle")
-                .font(.headline)
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var statsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Stats").font(.headline).foregroundStyle(.secondary)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                StatCard(title: "Overall", value: "\(state.overallScore)/10", icon: "heart.fill", color: .pink)
-                if let w = state.weight {
-                    let display = useKg ? w : w / 0.453592
-                    let unit = useKg ? "kg" : "lbs"
-                    StatCard(title: "Weight", value: String(format: "%.1f \(unit)", display), icon: "scalemass", color: .blue)
-                }
-                if let w = state.water {
-                    let display = useLitres ? w : w / 0.0295735
-                    let unit = useLitres ? "L" : "oz"
-                    StatCard(title: "Water", value: String(format: "%.1f \(unit)", display), icon: "drop.fill", color: .cyan)
-                }
-                if state.isInjectionDay {
-                    StatCard(title: "Injection", value: String(format: "%.2fmg", state.injectionDose), icon: "syringe.fill", color: .purple)
-                }
-            }
-        }
-    }
-
-    private var healthKitSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Health Data").font(.headline).foregroundStyle(.secondary)
-            if isLoadingHK {
-                HStack { Spacer(); ProgressView(); Spacer() }
-            } else {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    if let hr = heartRate {
-                        StatCard(title: "Resting HR", value: "\(Int(hr)) bpm", icon: "waveform.path.ecg", color: .red)
-                    }
-                    if let sleep = sleepData {
-                        StatCard(title: "Sleep", value: String(format: "%.1f hrs", sleep.totalHours), icon: "bed.double.fill", color: .indigo)
-                        if sleep.remHours > 0 {
-                            StatCard(title: "REM", value: String(format: "%.0f min", sleep.remHours * 60), icon: "moon.fill", color: .purple)
-                        }
-                        if sleep.deepHours > 0 {
-                            StatCard(title: "Deep", value: String(format: "%.0f min", sleep.deepHours * 60), icon: "zzz", color: .blue)
-                        }
-                    }
-                    if heartRate == nil && sleepData == nil {
-                        Text("No HealthKit data available for today")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-    }
-
-    private var symptomsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Symptoms").font(.headline).foregroundStyle(.secondary)
-            if presentSymptoms.isEmpty {
-                Text("No symptoms reported today")
-                    .foregroundStyle(.secondary)
-                    .italic()
-            } else {
-                FlowLayout(spacing: 8) {
-                    ForEach(presentSymptoms) { symptom in
-                        SymptomChip(symptom: symptom, severity: state.symptomSeverities[symptom.id])
-                    }
-                }
-            }
-        }
-    }
-
-    private var cautionBannersSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Cautions").font(.headline).foregroundStyle(.secondary)
-            ForEach(cautionWarnings) { warning in
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .foregroundStyle(.orange)
-                    Text(warning.message)
-                        .font(.subheadline)
-                }
-                .padding()
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
-            }
-        }
-    }
-
-    // MARK: Actions
-
-    private func loadHealthKitData() async {
-        heartRate = await HeartRateReader().readTodayRestingHeartRate()
-        sleepData = await SleepReader().readLastNightSleep()
-        isLoadingHK = false
-    }
-
-    private func evaluateWarnings() {
-        let draftEntries = state.symptomEntries(checkInId: UUID(), date: Date())
-        let allWarnings = SymptomWarningEvaluator.evaluate(entries: draftEntries)
-        pendingStopWarnings = allWarnings.filter { $0.level == .stopDrug }
-        cautionWarnings = allWarnings.filter { $0.level == .caution }
-
-        if pendingStopWarnings.isEmpty {
-            acknowledgedAllStopWarnings = true
-        } else {
-            currentStopWarning = pendingStopWarnings.first
-        }
-    }
-
     private func dismissStopWarning() {
-        if !pendingStopWarnings.isEmpty {
-            pendingStopWarnings.removeFirst()
-        }
+        pendingStopWarnings.removeFirst()
         currentStopWarning = nil
-
-        if pendingStopWarnings.isEmpty {
-            acknowledgedAllStopWarnings = true
-        } else {
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(400))
-                currentStopWarning = pendingStopWarnings.first
+        if let next = pendingStopWarnings.first {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                currentStopWarning = next
             }
-        }
-    }
-
-    private func save() {
-        guard !isSaving else { return }
-        isSaving = true
-
-        let date = Date()
-        let checkInId = UUID()
-        let symptoms = state.symptomEntries(checkInId: checkInId, date: date)
-
-        let checkIn = DailyCheckIn(
-            date: date,
-            weightKg: state.weight,
-            waterLitres: state.water,
-            overallScore: state.overallScore,
-            cycleDay: cycleDay
-        )
-        checkIn.id = checkInId
-        symptoms.forEach { checkIn.symptoms.append($0) }
-        modelContext.insert(checkIn)
-
-        if state.isInjectionDay {
-            let log = InjectionLog(
-                date: date,
-                time: state.injectionTime,
-                doseMg: state.injectionDose,
-                doseLabel: String(format: "%.2fmg", state.injectionDose),
-                injectionSiteNote: state.injectionSiteNote.isEmpty ? nil : state.injectionSiteNote
-            )
-            modelContext.insert(log)
-            checkIn.injectionLogId = log.id
-        }
-
-        Task {
-            let writer = HealthKitWriter()
-            if let weight = state.weight { try? await writer.writeWeight(weight, date: date) }
-            if let water = state.water { try? await writer.writeWater(water, date: date) }
-            await writer.writeSymptoms(symptoms, date: date)
-
-            let snapshot = await HealthKitMirror().buildSnapshot(for: date, checkIn: checkIn)
-            modelContext.insert(snapshot)
-            checkIn.healthSnapshotId = snapshot.id
-
-            isSaving = false
-            onDone()
+        } else {
+            onSave()
         }
     }
 }
 
-// MARK: Supporting views
+// MARK: - Stat Card
 
-private struct StatCard: View {
-    let title: String
-    let value: String
+struct StatCard: View {
     let icon: String
     let color: Color
+    let label: String
+    let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon)
-                .font(.caption.bold())
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
                 .foregroundStyle(color)
             Text(value)
                 .font(.title3.bold())
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity)
         .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
-private struct SymptomChip: View {
+// MARK: - Symptom Chip
+
+struct SymptomChip: View {
     let symptom: Symptom
     let severity: Int?
 
     var body: some View {
         HStack(spacing: 4) {
-            Circle()
-                .fill(chipColor)
-                .frame(width: 8, height: 8)
             Text(symptom.name)
-                .font(.caption.bold())
-            if let s = severity {
-                Text("(\(s)/5)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let sev = severity {
+                Text("(\(sev)/5)")
+                    .opacity(0.7)
             }
         }
+        .font(.caption.weight(.medium))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(chipColor.opacity(0.12), in: Capsule())
+        .background(chipColor.opacity(0.15), in: Capsule())
+        .foregroundStyle(chipColor)
     }
 
     private var chipColor: Color {
         switch symptom.warningLevel {
         case .stopDrug: return .red
-        case .caution: return .orange
-        case .none: return Color.accentColor
+        case .consultDoctor: return .orange
+        case .normal: return Color.accentColor
         }
     }
 }
 
+// MARK: - Stop Drug Warning Modal
+
 struct StopDrugWarningModal: View {
     let warning: WarningResult
-    let onAcknowledge: () -> Void
+    let onDismiss: () -> Void
 
     @State private var confirmed = false
 
     var body: some View {
         ZStack {
             Color.red.ignoresSafeArea()
+
             VStack(spacing: 32) {
                 Spacer()
-                Image(systemName: "exclamationmark.octagon.fill")
-                    .font(.system(size: 64))
+
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 80))
                     .foregroundStyle(.white)
 
                 Text("Important Warning")
-                    .font(.title.bold())
+                    .font(.largeTitle.bold())
                     .foregroundStyle(.white)
 
                 Text(warning.message)
                     .font(.body)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.white.opacity(0.9))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
                 Toggle(isOn: $confirmed) {
-                    Text("I have read and understood this warning")
+                    Text("I understand and will contact my doctor")
                         .foregroundStyle(.white)
-                        .font(.subheadline)
+                        .font(.subheadline.weight(.medium))
                 }
                 .tint(.white)
                 .padding(.horizontal)
 
                 Button {
-                    onAcknowledge()
+                    if confirmed { onDismiss() }
                 } label: {
-                    Text("I Understand")
+                    Text("Continue")
                         .frame(maxWidth: .infinity)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(confirmed ? Color.red : Color.gray)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.white)
@@ -359,49 +261,46 @@ struct StopDrugWarningModal: View {
     }
 }
 
-// MARK: FlowLayout helper
+// MARK: - Flow Layout
 
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = computeRows(proposal: proposal, subviews: subviews)
-        let rowHeights: [CGFloat] = rows.map { row in
-            row.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        let width = proposal.width ?? 0
+        var height: CGFloat = 0
+        var x: CGFloat = 0
+        var rowHeight: CGFloat = 0
+
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > width, x > 0 {
+                height += rowHeight + spacing
+                x = 0
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
-        let totalSpacing = spacing * CGFloat(max(0, rows.count - 1))
-        let height = rowHeights.reduce(0, +) + totalSpacing
-        return CGSize(width: proposal.width ?? 0, height: max(0, height))
+        height += rowHeight
+        return CGSize(width: width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let rows = computeRows(proposal: ProposedViewSize(bounds.size), subviews: subviews)
+        var x = bounds.minX
         var y = bounds.minY
-        for row in rows {
-            var x = bounds.minX
-            let rowHeight = row.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
-            for subview in row {
-                let size = subview.sizeThatFits(.unspecified)
-                subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
-                x += size.width + spacing
-            }
-            y += rowHeight + spacing
-        }
-    }
+        var rowHeight: CGFloat = 0
 
-    private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [[LayoutSubview]] {
-        var rows: [[LayoutSubview]] = [[]]
-        var x: CGFloat = 0
-        let maxWidth = proposal.width ?? .infinity
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x + size.width > maxWidth, !rows[rows.endIndex - 1].isEmpty {
-                rows.append([])
-                x = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x + size.width > bounds.maxX, x > bounds.minX {
+                y += rowHeight + spacing
+                x = bounds.minX
+                rowHeight = 0
             }
-            rows[rows.endIndex - 1].append(subview)
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
             x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
         }
-        return rows
     }
 }
