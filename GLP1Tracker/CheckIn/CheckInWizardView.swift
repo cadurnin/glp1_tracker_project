@@ -141,11 +141,12 @@ struct CheckInWizardView: View {
 
         modelContext.insert(checkIn)
 
-        // HealthKit write
+        // HealthKit write — capture date now; state is reset below before the Task body runs
+        let checkInDate = checkIn.date
         Task {
             await HealthKitWriter.write(checkIn: checkIn)
-            let snapshot = await HealthKitMirror.buildSnapshot(for: state.date, checkIn: checkIn)
-            await MainActor.run { modelContext.insert(snapshot) }
+            let snapshot = await HealthKitMirror.buildSnapshot(for: checkInDate, checkIn: checkIn)
+            modelContext.insert(snapshot)
         }
 
         // Reset wizard

@@ -47,6 +47,11 @@ struct HealthKitWriter {
             }
         }
 
-        try? await store.save(samples)
+        guard !samples.isEmpty else { return }
+        do {
+            try await store.save(samples)
+        } catch {
+            print("[HealthKitWriter] Save failed: \(error)")
+        }
     }
 }
