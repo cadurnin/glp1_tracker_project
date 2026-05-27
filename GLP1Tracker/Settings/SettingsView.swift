@@ -15,6 +15,7 @@ struct SettingsView: View {
     @State private var reminderDate = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var showWeeklyCheckIn = false
     @State private var exportFile: CSVExportFile?
+    @State private var showExportErrorAlert = false
     @State private var showDeleteAllAlert = false
     @State private var showDeleteAllConfirmAlert = false
 
@@ -80,6 +81,11 @@ struct SettingsView: View {
             .sheet(item: $exportFile) { file in
                 ShareSheet(items: [file.url])
             }
+            .alert("Export Failed", isPresented: $showExportErrorAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Could not create the CSV file. Please try again.")
+            }
             // First alert — confirm intent
             .alert("Delete All Data?", isPresented: $showDeleteAllAlert) {
                 Button("Delete Everything", role: .destructive) {
@@ -119,6 +125,7 @@ struct SettingsView: View {
             exportFile = CSVExportFile(url: url)
         } catch {
             exportFile = nil
+            showExportErrorAlert = true
         }
     }
 
