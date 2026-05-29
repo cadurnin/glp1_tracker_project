@@ -10,6 +10,12 @@ struct SleepData {
 }
 
 struct SleepReader {
+    /// Reads sleep data from HealthKit for the sleep window preceding a given date.
+    /// Sleep window spans from 15:00 (3 PM) the previous day to 12:00 (noon) on the given date.
+    /// Accumulates total, REM, and deep sleep hours; tracks earliest bedtime and latest wake time.
+    /// - Parameters:
+    ///   - date: The date to fetch sleep data for (represents the morning after sleep).
+    /// - Returns: SleepData with aggregated sleep metrics, or nil if no sleep samples are found.
     static func readSleep(for date: Date) async -> SleepData? {
         let store = HealthKitManager.shared.store
         let calendar = Calendar.current

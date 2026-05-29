@@ -118,15 +118,27 @@ struct SettingsView: View {
 
     private func exportCSV() {
         let csv = CSVExporter.export(checkIns: checkIns)
-        let fileName = "GLP1Tracker_\(Date().formatted(.iso8601.year().month().day())).csv"
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        let fileName = csvFileName(for: Date())
         do {
-            try csv.write(to: url, atomically: true, encoding: .utf8)
+            let url = try writeCSV(csv, fileName: fileName)
             exportFile = CSVExportFile(url: url)
         } catch {
             exportFile = nil
             showExportErrorAlert = true
         }
+    }
+
+    /// Returns a timestamped CSV filename for the given date.
+    private func csvFileName(for date: Date) -> String {
+        "GLP1Tracker_\(date.formatted(.iso8601.year().month().day())).csv"
+    }
+
+    /// Writes CSV content to the temp directory and returns the file URL.
+    /// - Throws: File system errors from `String.write(to:atomically:encoding:)`.
+    private func writeCSV(_ content: String, fileName: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        return url
     }
 
     private func deleteAllData() {

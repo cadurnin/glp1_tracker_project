@@ -16,6 +16,11 @@ enum OutlierDetector {
     private static let minimumDataPoints = 7
     private static let zThreshold = 1.5
 
+    /// Detects outliers in weight velocity, wellbeing score, and water intake using z-score analysis.
+    /// Requires at least 7 check-ins; returns empty array if below threshold.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of OutlierInsight describing detected anomalies with trend direction and date.
     static func detect(checkIns: [DailyCheckIn]) -> [OutlierInsight] {
         guard checkIns.count >= minimumDataPoints else { return [] }
         var insights: [OutlierInsight] = []
@@ -28,6 +33,11 @@ enum OutlierDetector {
         return insights
     }
 
+    /// Detects unusual daily weight changes using z-score analysis on velocity (kg/day).
+    /// Ignores check-ins without weight data; returns empty array if insufficient data points.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of OutlierInsight for detected weight velocity anomalies.
     private static func weightOutliers(checkIns: [DailyCheckIn]) -> [OutlierInsight] {
         let sorted = checkIns.sorted { $0.date < $1.date }
         var velocities: [(Date, Double)] = []
@@ -48,6 +58,11 @@ enum OutlierDetector {
         )
     }
 
+    /// Detects unusually high or low overall wellbeing scores using z-score analysis.
+    /// Returns empty array if fewer than 7 check-ins.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of OutlierInsight for detected score anomalies.
     private static func scoreOutliers(checkIns: [DailyCheckIn]) -> [OutlierInsight] {
         let data = checkIns.sorted { $0.date < $1.date }.map { ($0.date, Double($0.overallScore)) }
         return zScoreInsights(
@@ -60,6 +75,11 @@ enum OutlierDetector {
         )
     }
 
+    /// Detects unusual daily water intake using z-score analysis.
+    /// Ignores check-ins without water data; returns empty array if insufficient data points.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of OutlierInsight for detected water intake anomalies.
     private static func waterOutliers(checkIns: [DailyCheckIn]) -> [OutlierInsight] {
         let data = checkIns.sorted { $0.date < $1.date }.compactMap { c -> (Date, Double)? in
             guard let w = c.waterLitres else { return nil }
@@ -75,11 +95,25 @@ enum OutlierDetector {
         )
     }
 
+    /// Detects unusual heart rate values. Currently disabled (heart rate data resides in HealthSnapshot, not DailyCheckIn).
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records (not used).
+    /// - Returns: Empty array.
     private static func heartRateOutliers(checkIns: [DailyCheckIn]) -> [OutlierInsight] {
         // Heart rate is in HealthSnapshot, not DailyCheckIn — skip for now
         return []
     }
 
+    /// Computes z-scores for a data series and generates OutlierInsight for the last 3 values exceeding the threshold.
+    /// Requires at least 7 data points and positive standard deviation; returns empty array otherwise.
+    /// - Parameters:
+    ///   - data: Array of (Date, Double) tuples representing timestamped measurements.
+    ///   - title: Title for generated insights (e.g., "Weight Change").
+    ///   - positiveMessage: Message shown when z-score > threshold.
+    ///   - negativeMessage: Message shown when z-score < -threshold.
+    ///   - positiveDirection: Trend direction for positive outliers.
+    ///   - negativeDirection: Trend direction for negative outliers.
+    /// - Returns: Array of OutlierInsight for detected anomalies in the last 3 entries.
     private static func zScoreInsights(
         data: [(Date, Double)],
         title: String,

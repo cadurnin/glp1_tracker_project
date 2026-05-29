@@ -77,6 +77,10 @@ struct EditCheckInView: View {
 
     // MARK: Symptom section builder
 
+    /// Renders a collapsible section of symptoms grouped by category, with toggles and optional severity sliders.
+    /// - Parameters:
+    ///   - title: The display title for this symptom group.
+    ///   - category: The SymptomCategory to filter and display.
     @ViewBuilder
     private func symptomSection(_ title: String, category: SymptomCategory) -> some View {
         let symptoms = SymptomList.all.filter { $0.category == category }
@@ -110,15 +114,17 @@ struct EditCheckInView: View {
 
     // MARK: Populate from existing check-in
 
+    /// Loads the check-in data into editor state variables, applying unit conversion if configured.
+    /// Initializes all symptoms (present or absent) to allow editing of their status.
     private func populateFields() {
         overallScore = checkIn.overallScore
 
         if let w = checkIn.weightKg {
-            let display = useKg ? w : w / 0.453592
+            let display = useKg ? w : UnitConverter.lbsFrom(kg: w)
             weightInput = String(format: "%.1f", display)
         }
         if let w = checkIn.waterLitres {
-            let display = useLitres ? w : w / 0.0295735
+            let display = useLitres ? w : UnitConverter.ozFrom(litres: w)
             waterInput = String(format: "%.1f", display)
         }
 
@@ -137,42 +143,58 @@ struct EditCheckInView: View {
 
     // MARK: Save
 
+    /// Updates the check-in with edited values, rebuilds symptoms, and dismisses the view.
+    /// Converts weight and water from user input and display units; replaces all symptom entries.
     private func save() {
-        // Update weight
-        if let val = Double(weightInput), val > 0 {
-            checkIn.weightKg = useKg ? val : val * 0.453592
-        } else if weightInput.isEmpty {
-            checkIn.weightKg = nil
-        }
-
-        // Update water
-        if let val = Double(waterInput), val > 0 {
-            checkIn.waterLitres = useLitres ? val : val * 0.0295735
-        } else if waterInput.isEmpty {
-            checkIn.waterLitres = nil
-        }
-
+        checkIn.weightKg = Self.weightKg(from: weightInput, useKg: useKg)
+        checkIn.waterLitres = Self.waterLitres(from: waterInput, useLitres: useLitres)
         checkIn.overallScore = overallScore
 
         // Update symptoms — delete existing, insert updated
-        let existingEntries = checkIn.symptoms
-        for entry in existingEntries {
-            modelContext.delete(entry)
-        }
+        for entry in checkIn.symptoms { modelContext.delete(entry) }
         checkIn.symptoms.removeAll()
-
-        for symptom in SymptomList.all {
-            let present = symptomAnswers[symptom.id] ?? false
-            let entry = SymptomEntry(
-                symptomId: symptom.id,
-                present: present,
-                severity: present && symptom.tracksSeverity ? (symptomSeverities[symptom.id] ?? 1) : nil,
-                date: checkIn.date,
-                checkInId: checkIn.id
-            )
-            checkIn.symptoms.append(entry)
-        }
+        checkIn.symptoms.append(contentsOf: Self.buildSymptomEntries(
+            answers: symptomAnswers,
+            severities: symptomSeverities,
+            date: checkIn.date,
+            checkInId: checkIn.id
+        ))
 
         dismiss()
+    }
+
+    /// Returns the weight in kg from a user-entered string.
+    /// Returns nil when the input is empty; preserves nil to clear an optional field.
+    private static func weightKg(from input: String, useKg: Bool) -> Double? {
+        guard !input.isEmpty else { return nil }
+        guard let val = Double(input), val > 0 else { return nil }
+        return useKg ? val : UnitConverter.kgFrom(lbs: val)
+    }
+
+    /// Returns the water amount in litres from a user-entered string.
+    /// Returns nil when the input is empty; preserves nil to clear an optional field.
+    private static func waterLitres(from input: String, useLitres: Bool) -> Double? {
+        guard !input.isEmpty else { return nil }
+        guard let val = Double(input), val > 0 else { return nil }
+        return useLitres ? val : UnitConverter.litresFrom(oz: val)
+    }
+
+    /// Constructs SymptomEntry values from the current edit state. Pure — no side effects.
+    private static func buildSymptomEntries(
+        answers: [String: Bool],
+        severities: [String: Int],
+        date: Date,
+        checkInId: UUID
+    ) -> [SymptomEntry] {
+        SymptomList.all.map { symptom in
+            let present = answers[symptom.id] ?? false
+            return SymptomEntry(
+                symptomId: symptom.id,
+                present: present,
+                severity: present && symptom.tracksSeverity ? (severities[symptom.id] ?? 1) : nil,
+                date: date,
+                checkInId: checkInId
+            )
+        }
     }
 }

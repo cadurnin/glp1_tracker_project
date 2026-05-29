@@ -1,7 +1,12 @@
-import SwiftUI
-import UIKit
+import Foundation
 
 struct CSVExporter {
+    /// Exports check-in records to a CSV-formatted string with metadata and symptoms.
+    /// Sorts check-ins by date ascending and includes all symptoms from SymptomList as columns.
+    /// Symptoms with severity show "Yes (n/5)" where n is the severity level.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to export.
+    /// - Returns: CSV string with header and rows separated by newlines. Empty array produces header only.
     static func export(checkIns: [DailyCheckIn]) -> String {
         let headerMeta = ["Date", "Overall Score", "Weight (kg)", "Water (L)", "Cycle Day", "Injection Day"]
         let headerSymptoms = SymptomList.all.map { $0.name }
@@ -29,16 +34,4 @@ struct CSVExporter {
 
         return ([header] + rows).joined(separator: "\n")
     }
-}
-
-// MARK: - Share Sheet
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

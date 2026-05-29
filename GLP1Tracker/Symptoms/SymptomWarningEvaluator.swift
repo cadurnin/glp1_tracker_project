@@ -8,6 +8,11 @@ struct WarningResult: Identifiable {
 }
 
 enum SymptomWarningEvaluator {
+    /// Evaluates symptom entries against warning rules and combination heuristics.
+    /// Generates individual stop-drug warnings, a kidney stress combination rule, and consult-doctor warnings.
+    /// - Parameters:
+    ///   - entries: Array of SymptomEntry records to evaluate (present = true entries trigger warnings).
+    /// - Returns: Array of WarningResult with messages and warning levels.
     static func evaluate(entries: [SymptomEntry]) -> [WarningResult] {
         var results: [WarningResult] = []
         let presentIds = Set(entries.filter { $0.present }.map { $0.symptomId })

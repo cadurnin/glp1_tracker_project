@@ -15,6 +15,14 @@ final class DailyCheckIn {
     @Relationship(deleteRule: .cascade)
     var symptoms: [SymptomEntry] = []
 
+    /// Initializes a daily check-in record with user-reported metrics and optional injection tracking.
+    /// - Parameters:
+    ///   - date: The date of the check-in. Defaults to today.
+    ///   - weightKg: Body weight in kilograms, optional (can be nil to represent unmeasured).
+    ///   - waterLitres: Water intake in litres, optional.
+    ///   - overallScore: Self-reported wellbeing score from 1–10. Defaults to 5.
+    ///   - injectionLogId: UUID of associated InjectionLog if this is an injection day, nil otherwise.
+    ///   - cycleDay: Days since the last injection (1-based). Defaults to 0.
     init(date: Date = Date(),
          weightKg: Double? = nil,
          waterLitres: Double? = nil,

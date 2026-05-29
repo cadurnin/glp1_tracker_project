@@ -3,10 +3,17 @@ import HealthKit
 class HeartRateReader {
     private let store: HKHealthStore
 
+    /// Initializes the reader with a HealthKit store.
+    /// - Parameters:
+    ///   - store: The HKHealthStore used to query resting heart rate data.
     init(store: HKHealthStore) {
         self.store = store
     }
 
+    /// Fetches average daily resting heart rate readings for the past 90 days.
+    /// Calculates daily statistics for each day and returns sorted by date ascending.
+    /// - Returns: Array of DailyHeartRate readings sorted by date (oldest first). Returns empty array if no data.
+    /// - Throws: HKError if the HealthKit query fails or authorization is denied.
     func fetchLast90Days() async throws -> [DailyHeartRate] {
         let heartRateType = HKQuantityType(.restingHeartRate)
         let calendar = Calendar.current

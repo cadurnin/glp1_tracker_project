@@ -58,7 +58,7 @@ struct WeeklyCheckInView: View {
 
         var weightKg: Double?
         if let val = Double(weightInput), val > 0 {
-            weightKg = useKg ? val : val * 0.453592
+            weightKg = useKg ? val : UnitConverter.kgFrom(lbs: val)
         }
 
         let checkIn = WeeklyCheckIn(
