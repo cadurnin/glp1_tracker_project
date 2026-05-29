@@ -15,6 +15,8 @@ enum WizardStep: Equatable, Hashable {
 
 // MARK: - Check-In State
 
+/// Holds mutable state for the multi-step check-in wizard.
+/// Tracks the current step, date, injection details, measurements, symptoms, and severity ratings.
 @Observable
 final class CheckInState {
     var step: WizardStep = .injection
@@ -37,6 +39,7 @@ final class CheckInState {
     // Overall
     var overallScore: Int = 5
 
+    /// Filters symptoms that were marked present and track severity.
     var answeredSymptoms: [Symptom] {
         SymptomList.all.filter { symptomAnswers[$0.id] == true && $0.tracksSeverity }
     }
@@ -44,6 +47,8 @@ final class CheckInState {
 
 // MARK: - Wizard View
 
+/// Multi-step check-in wizard that guides users through daily symptom, injection, and measurement entry.
+/// Shows a summary if the user has already checked in today; otherwise displays the wizard flow.
 struct CheckInWizardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \DailyCheckIn.date, order: .reverse) private var checkIns: [DailyCheckIn]
@@ -53,6 +58,7 @@ struct CheckInWizardView: View {
     @AppStorage("useKg") private var useKg = true
     @AppStorage("useLitres") private var useLitres = true
 
+    /// Returns true if the most recent check-in is from today.
     private var hasCheckedInToday: Bool {
         guard let recent = checkIns.first else { return false }
         return Calendar.current.isDateInToday(recent.date)
@@ -74,6 +80,7 @@ struct CheckInWizardView: View {
         }
     }
 
+    /// Returns the SwiftUI view matching the current wizard step.
     @ViewBuilder
     private var wizardContent: some View {
         switch state.step {
@@ -94,26 +101,18 @@ struct CheckInWizardView: View {
         }
     }
 
+    /// Persists the wizard state to the model context and HealthKit, then resets the wizard.
+    /// Triggers async HealthKit write and snapshot building without blocking the UI.
     private func save() {
         let checkIn = DailyCheckIn(
             date: state.date,
             overallScore: state.overallScore
         )
 
-        // Weight
-        if let val = Double(state.weightInput), val > 0 {
-            checkIn.weightKg = useKg ? val : val * 0.453592
-        }
-
-        // Water
-        if let val = Double(state.waterInput), val > 0 {
-            checkIn.waterLitres = useLitres ? val : val * 0.0295735
-        }
-
-        // Cycle day
+        checkIn.weightKg = CheckInTransformer.weightKg(from: state.weightInput, useKg: useKg)
+        checkIn.waterLitres = CheckInTransformer.waterLitres(from: state.waterInput, useLitres: useLitres)
         checkIn.cycleDay = InjectionLog.cycleDay(from: injections.first?.date)
 
-        // Injection log
         if state.isInjectionDay {
             let log = InjectionLog(
                 date: state.date,
@@ -126,18 +125,13 @@ struct CheckInWizardView: View {
             checkIn.injectionLogId = log.id
         }
 
-        // Symptoms
-        for symptom in SymptomList.all {
-            let present = state.symptomAnswers[symptom.id] ?? false
-            let entry = SymptomEntry(
-                symptomId: symptom.id,
-                present: present,
-                severity: present && symptom.tracksSeverity ? (state.symptomSeverities[symptom.id] ?? 1) : nil,
-                date: state.date,
-                checkInId: checkIn.id
-            )
-            checkIn.symptoms.append(entry)
-        }
+        let entries = CheckInTransformer.buildSymptomEntries(
+            answers: state.symptomAnswers,
+            severities: state.symptomSeverities,
+            date: state.date,
+            checkInId: checkIn.id
+        )
+        checkIn.symptoms.append(contentsOf: entries)
 
         modelContext.insert(checkIn)
 
@@ -152,10 +146,12 @@ struct CheckInWizardView: View {
         // Reset wizard
         state = CheckInState()
     }
+
 }
 
 // MARK: - Today Summary View
 
+/// Displays a summary of today's check-in after the user has already completed one.
 struct TodaySummaryView: View {
     let checkIn: DailyCheckIn
 

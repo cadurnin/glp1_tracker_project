@@ -3,6 +3,11 @@ import Foundation
 struct HeartRateAnalyzer {
     private static let stdDevMultiplier = 2.0
 
+    /// Analyzes resting heart rate readings to compute statistics and identify outliers.
+    /// Requires at least 7 readings; returns empty stats with hasEnoughData=false if below threshold.
+    /// - Parameters:
+    ///   - readings: Array of DailyHeartRate measurements (can be empty).
+    /// - Returns: HeartRateStats with 90-day mean, standard deviation, outliers, and 7-day average.
     static func analyze(_ readings: [DailyHeartRate]) -> HeartRateStats {
         guard readings.count >= 7 else {
             return HeartRateStats(

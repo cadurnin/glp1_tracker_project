@@ -1,13 +1,13 @@
 import Foundation
 
 struct HealthKitMirror {
+    /// Reads HealthKit data and check-in fields to produce a HealthSnapshot.
+    /// Async reads are performed first; symptom mapping is delegated to `applySymptoms`.
     static func buildSnapshot(for date: Date, checkIn: DailyCheckIn) async -> HealthSnapshot {
         let snapshot = HealthSnapshot(date: date)
 
-        // Heart rate
         snapshot.restingHeartRate = await HeartRateReader.readRestingHeartRate(for: date)
 
-        // Sleep
         if let sleep = await SleepReader.readSleep(for: date) {
             snapshot.sleepHours = sleep.totalHours
             snapshot.sleepREM = sleep.remHours
@@ -19,8 +19,15 @@ struct HealthKitMirror {
         snapshot.weightKg = checkIn.weightKg
         snapshot.waterLitres = checkIn.waterLitres
 
-        // Mirror symptom flags
-        for entry in checkIn.symptoms where entry.present {
+        applySymptoms(checkIn.symptoms, to: snapshot)
+
+        return snapshot
+    }
+
+    /// Maps present SymptomEntry values onto the corresponding Bool properties of a HealthSnapshot.
+    /// Pure mapping — reads entries, writes snapshot flags, no async or I/O.
+    private static func applySymptoms(_ entries: [SymptomEntry], to snapshot: HealthSnapshot) {
+        for entry in entries where entry.present {
             switch entry.symptomId {
             case "nausea":               snapshot.nausea = true
             case "vomiting":             snapshot.vomiting = true
@@ -55,7 +62,5 @@ struct HealthKitMirror {
             default: break
             }
         }
-
-        return snapshot
     }
 }

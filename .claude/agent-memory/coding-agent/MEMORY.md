@@ -1,0 +1,2 @@
+- [Build environment](feedback_build_environment.md) — xcodebuild broken due to CoreSimulator mismatch; use swiftc -typecheck as fallback
+- [Pre-existing compile errors](project_preexisting_errors.md) — HealthKitMirror.swift has a pre-existing static method call that doesn't exist on HeartRateReader

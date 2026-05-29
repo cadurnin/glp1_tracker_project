@@ -8,11 +8,14 @@ extension Notification.Name {
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     static let shared = NotificationManager()
 
+    /// Initializes the shared NotificationManager and sets itself as the notification center delegate.
     private override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
     }
 
+    /// Requests user permission to send notifications with alert, sound, and badge options.
+    /// - Returns: True if authorization was granted, false otherwise.
     func requestPermission() async -> Bool {
         do {
             return try await UNUserNotificationCenter.current()
@@ -22,6 +25,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Schedules a daily repeating notification at a specified time of day.
+    /// Removes any existing "dailyCheckIn" notification before scheduling.
+    /// - Parameters:
+    ///   - timeOfDay: Time of day in seconds (0 to 86399). Converted to hour:minute components.
     func scheduleDailyReminder(timeOfDay seconds: Double) {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: ["dailyCheckIn"])
@@ -39,12 +46,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
         let request = UNNotificationRequest(identifier: "dailyCheckIn", content: content, trigger: trigger)
         center.add(request)
-
-        // Sunday weekly check-in at 18:00
-        scheduleSundayReminder()
     }
 
-    private func scheduleSundayReminder() {
+    /// Schedules a weekly repeating notification for every Sunday at 18:00.
+    /// Removes any existing "weeklyCheckIn" notification before scheduling.
+    func scheduleSundayReminder() {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: ["weeklyCheckIn"])
 
@@ -66,6 +72,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - UNUserNotificationCenterDelegate
 
+    /// Handles notification responses when the user taps a notification.
+    /// Extracts the "destination" key from userInfo and posts an openDestination notification if present.
+    /// - Parameters:
+    ///   - center: The notification center that delivered the notification.
+    ///   - response: The user's response to the notification.
+    ///   - completionHandler: A closure to call when handling is complete.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  didReceive response: UNNotificationResponse,
                                  withCompletionHandler completionHandler: @escaping () -> Void) {
@@ -78,6 +90,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         completionHandler()
     }
 
+    /// Handles notifications that arrive while the app is in the foreground.
+    /// Displays notifications as a banner with sound when the app is active.
+    /// - Parameters:
+    ///   - center: The notification center that delivered the notification.
+    ///   - notification: The notification that arrived while the app was in the foreground.
+    ///   - completionHandler: A closure to call with presentation options.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                  willPresent notification: UNNotification,
                                  withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {

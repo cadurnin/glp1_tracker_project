@@ -8,6 +8,11 @@ struct PatternInsight: Identifiable {
 }
 
 enum SymptomPatternAnalyzer {
+    /// Analyzes symptom patterns across check-ins to detect frequency, severity trends, new symptoms, and injection-day correlations.
+    /// Requires at least 7 check-ins; returns empty array if below threshold.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of PatternInsight describing detected symptom patterns and trends.
     static func analyze(checkIns: [DailyCheckIn]) -> [PatternInsight] {
         guard checkIns.count >= 7 else { return [] }
         var insights: [PatternInsight] = []
@@ -22,6 +27,10 @@ enum SymptomPatternAnalyzer {
 
     // MARK: Frequency
 
+    /// Detects symptoms appearing in ≥70% of the last 7 check-ins.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of PatternInsight for frequently reported symptoms.
     private static func frequencyInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
         let recent = Array(checkIns.sorted { $0.date > $1.date }.prefix(7))
         let totalDays = Double(recent.count)
@@ -43,6 +52,11 @@ enum SymptomPatternAnalyzer {
 
     // MARK: New symptom
 
+    /// Detects symptoms that appeared in the last 3 check-ins but not in earlier ones.
+    /// Requires at least 8 check-ins; returns empty array otherwise.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of PatternInsight for newly reported symptoms.
     private static func newSymptomInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
         let sorted = checkIns.sorted { $0.date < $1.date }
         guard sorted.count >= 8 else { return [] }
@@ -65,6 +79,11 @@ enum SymptomPatternAnalyzer {
 
     // MARK: Severity trend
 
+    /// Detects symptoms that track severity and are either worsening (recent avg > old avg + 1.0) or improving (recent avg < old avg - 1.0).
+    /// Skips symptoms without severity tracking; requires at least 4 severity entries per symptom.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array of PatternInsight for symptoms with improving or worsening trends.
     private static func severityTrendInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
         let sorted = checkIns.sorted { $0.date < $1.date }
         var insights: [PatternInsight] = []
@@ -101,6 +120,11 @@ enum SymptomPatternAnalyzer {
 
     // MARK: Cycle day
 
+    /// Detects if injection days (those with injectionLogId) have ≥3 symptoms on average, suggesting an injection-day pattern.
+    /// Requires at least 3 injection-day check-ins; returns empty array otherwise.
+    /// - Parameters:
+    ///   - checkIns: Array of DailyCheckIn records to analyze.
+    /// - Returns: Array with zero or one PatternInsight describing injection-day symptom correlation.
     private static func cycleDayInsights(checkIns: [DailyCheckIn]) -> [PatternInsight] {
         let injectionDayCheckIns = checkIns.filter { $0.injectionLogId != nil }
         guard injectionDayCheckIns.count >= 3 else { return [] }

@@ -49,6 +49,9 @@ final class HealthSnapshot {
     var palpitations: Bool = false
     var sweating: Bool = false
 
+    /// Initializes a health snapshot for a given date, combining HealthKit vitals and check-in symptom flags.
+    /// - Parameters:
+    ///   - date: The date of this snapshot. Defaults to today.
     init(date: Date = Date()) {
         self.id = UUID()
         self.date = date

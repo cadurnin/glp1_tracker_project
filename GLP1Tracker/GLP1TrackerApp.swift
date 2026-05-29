@@ -40,6 +40,7 @@ struct GLP1TrackerApp: App {
         _ = await NotificationManager.shared.requestPermission()
         let seconds = UserDefaults.standard.double(forKey: "reminderTimeSeconds")
         NotificationManager.shared.scheduleDailyReminder(timeOfDay: seconds > 0 ? seconds : 72000)
+        NotificationManager.shared.scheduleSundayReminder()
     }
 }
 
