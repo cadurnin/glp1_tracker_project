@@ -10,6 +10,31 @@ class HeartRateReader {
         self.store = store
     }
 
+    /// Reads the resting heart rate for a specific date from HealthKit.
+    /// - Parameters:
+    ///   - date: The date to fetch resting heart rate for.
+    /// - Returns: Average resting heart rate in BPM, or nil if no data is available.
+    static func readRestingHeartRate(for date: Date) async -> Double? {
+        let store = HealthKitManager.shared.store
+        let heartRateType = HKQuantityType(.restingHeartRate)
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: heartRateType, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate)]
+        )
+
+        guard let samples = try? await descriptor.result(for: store), !samples.isEmpty else {
+            return nil
+        }
+
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let total = samples.reduce(0.0) { $0 + $1.quantity.doubleValue(for: unit) }
+        return total / Double(samples.count)
+    }
+
     /// Fetches average daily resting heart rate readings for the past 90 days.
     /// Calculates daily statistics for each day and returns sorted by date ascending.
     /// - Returns: Array of DailyHeartRate readings sorted by date (oldest first). Returns empty array if no data.
