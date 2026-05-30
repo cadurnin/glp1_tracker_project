@@ -123,6 +123,7 @@ struct CheckInWizardView: View {
             )
             modelContext.insert(log)
             checkIn.injectionLogId = log.id
+            checkIn.cycleDay = 1
         }
 
         let entries = CheckInTransformer.buildSymptomEntries(
